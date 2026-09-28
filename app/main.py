@@ -223,6 +223,10 @@ def facebook_reels_url(url):
     if platform_of(url) != 'Facebook':
         raise HTTPException(422, 'Cần link Trang Facebook')
     parts = [p for p in parsed.path.split('/') if p]
+    # Facebook often shares personal profiles as /people/Name/NumericID/.
+    if len(parts) in (3, 4) and parts[0].lower() == 'people' and re.fullmatch(r'\d{10,20}', parts[2]):
+        if len(parts) == 3 or parts[3].lower() in ('reels', 'videos'):
+            return f'https://www.facebook.com/profile.php?id={parts[2]}&sk=reels_tab'
     if parts == ['profile.php']:
         profile_id = parse_qs(parsed.query).get('id', [''])[0]
         if not re.fullmatch(r'\d{10,20}', profile_id):

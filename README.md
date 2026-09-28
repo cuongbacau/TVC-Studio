@@ -16,6 +16,8 @@ Bản 0.5.7: giao diện quét có một ô Chế độ: 20 hoặc 50 video mớ
 
 Bản 0.5.8: Facebook không còn dùng nhãn ảnh “Bản xem trước ô thước phim” làm caption. Với lựa chọn quét 20/50 Reels, sau khi lấy lưới ảnh ứng dụng hỏi metadata riêng cho từng Reel (tối đa 4 yêu cầu đồng thời) bằng cookie Facebook trên máy chủ; cố lấy caption, hashtag, lượt xem, thời lượng và ngày đăng. Nếu nguồn chỉ trả tiêu đề có lượt xem, ứng dụng tách số lượt xem và caption từ tiêu đề. Thông tin không được Facebook cung cấp sẽ ẩn, không ghi một con số giả. Quét này có thể chờ lâu hơn; quét toàn kênh không gọi metadata từng video.
 
+Bản 0.5.9: quét Facebook nhận thêm link hồ sơ dạng `/people/Ten/ID/?sk=reels_tab`, tự đổi thành URL Reels theo ID. Khi dán link Reel riêng `/share/r/ID/`, giao diện tự chọn **Tải một video riêng**; dán lại link hồ sơ khi đang ở chế độ video sẽ trở về chế độ quét 20. Link chia sẻ riêng vẫn cần Facebook trả URL gốc lúc giải mã và cookie hợp lệ khi nguồn giới hạn truy cập.
+
 ## Cài trên Ubuntu
 
 Cần Docker Engine và Docker Compose plugin. Giải nén, vào thư mục `tvc-downloader`, rồi:

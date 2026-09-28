@@ -21,6 +21,13 @@ function enteredUrl() {
 function updateSourceHelp() {
   const value = enteredUrl();
   const shortFacebook = /facebook\.com\/share\/[rv]\//i.test(value);
+  if (/(?:facebook\.com\/(?:share\/[rv]\/|reels?\/\d{6,}|videos\/\d{6,})|facebook\.com\/watch\?v=)/i.test(value)) {
+    $('scanMode').value = 'single';
+    $('scanBtn').textContent = 'Tải video riêng';
+  } else if ($('scanMode').value === 'single' && /facebook\.com\/(?:profile\.php\?id=\d{10,20}|people\/[^/]+\/\d{10,20}|[^/]+\/reels\/)/i.test(value)) {
+    $('scanMode').value = '20';
+    $('scanBtn').textContent = 'Quét 20 video mới nhất';
+  }
   $('resolveBtn').hidden = !shortFacebook;
   const label = /douyin\.com/i.test(value) ? 'Douyin' : /tiktok\.com/i.test(value) ? 'TikTok' : /(facebook\.com|fb\.watch)/i.test(value) ? 'Facebook' : /youtu\.?be/i.test(value) ? 'YouTube' : '';
   $('sourceHelp').textContent = shortFacebook ? 'Link chia sẻ Facebook: chọn Tải một video riêng; ứng dụng tự giải mã khi tải.' : label ? 'Đã nhận link ' + label + '. Chọn cách quét kênh hoặc tải một video ở ô Chế độ.' : 'Bấm mẫu để điền đầu link kênh, rồi thêm tên hoặc ID. Có thể dán nguyên đoạn chia sẻ chứa link.';
@@ -57,7 +64,7 @@ $('scanBtn').onclick = async () => {
   if (!url) return note('Dán URL trước.', true);
   if (busy) return;
   if (mode === 'single') {
-    if (/(?:facebook\.com\/(?:profile\.php|[^/]+\/reels)|tiktok\.com\/@[^/]+\/?$|douyin\.com\/user\/)/i.test(url)) return note('Đây là link kênh. Hãy chọn một chế độ quét.', true);
+    if (/(?:facebook\.com\/(?:profile\.php|people\/[^/]+\/\d{10,20}|[^/]+\/reels)|tiktok\.com\/@[^/]+\/?$|douyin\.com\/user\/)/i.test(url)) return note('Đây là link kênh. Hãy chọn một chế độ quét.', true);
     busy = true; $('scanBtn').disabled = true;
     try { await add(url); } finally { busy = false; $('scanBtn').disabled = false; }
     return;
