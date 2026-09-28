@@ -1,0 +1,12 @@
+services:
+  tvc-downloader:
+    build: .
+    restart: unless-stopped
+    environment:
+      TVC_DATA: /data
+      TVC_USER: ${TVC_USER:?Set TVC_USER in .env}
+      TVC_PASSWORD: ${TVC_PASSWORD:?Set TVC_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data
