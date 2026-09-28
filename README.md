@@ -6,6 +6,8 @@ Bản 0.5.2: các ô Hoạt động mở hàng đợi theo trạng thái; ô URL
 
 Bản 0.5.3: quét tab Reels Facebook theo link dạng `https://www.facebook.com/profile.php?id=61589782348979&sk=reels_tab` hoặc `https://www.facebook.com/TenTrang/reels/`. Trình quét Chrome chạy ẩn trong container, đọc cookie Netscape từ `data/cookies/facebook.txt`, cuộn trang và đưa các link Reel tìm thấy vào bộ tải yt-dlp. Với Reels Facebook, cần cookie còn hạn để thấy các trang tiếp theo. Không gửi cookie vào chat/GitHub; chỉ chép vào Ubuntu. Việc cuộn có thể mất vài phút, tối đa 2.000 Reel cho một lượt **Tải cả kênh**; nếu Trang giới hạn nội dung, danh sách có thể không đầy đủ. Chrome làm bản Docker đầu tiên của phiên bản này lớn hơn.
 
+Bản 0.5.4: giao diện co giãn cho PC/điện thoại; kết quả quét có số thứ tự, ảnh thu nhỏ khi nguồn cung cấp và Chọn tất cả. Trình xem thử phát ngay sau khi bấm Xem nếu trình duyệt cho phép. Hàng đợi hiển thị số thứ tự, ngày giờ hoàn tất và file của từng tác vụ kèm Xem/Tải về; file cũ chưa gắn tác vụ cũng nằm ở cuối Hàng đợi. Nút Chọn tất cả ở Hàng đợi cho phép tải nhiều file về thiết bị (trình duyệt có thể hỏi quyền tải nhiều file). Trình quét Reels Facebook lấy ảnh từ lưới Reels khi trang trả ảnh.
+
 ## Cài trên Ubuntu
 
 Cần Docker Engine và Docker Compose plugin. Giải nén, vào thư mục `tvc-downloader`, rồi:
@@ -72,9 +74,9 @@ Kiểm tra: `sudo docker compose logs -f --tail=80`. Cập nhật yt-dlp/F2: `su
 
 ## Xem và tải về PC/điện thoại
 
-Ở danh sách quét kênh, bấm **Xem** để xem thử video hoặc ảnh khi nền tảng cung cấp đường dẫn phát trực tiếp. Nếu bị chặn, tải về Ubuntu rồi xem trong **Thư viện**. Video xem trước ưu tiên MP4 khoảng 720p; nguồn có thể hết hạn hoặc không cho phát từ trình duyệt.
+Ở danh sách quét kênh, bấm **Xem** để xem thử video hoặc ảnh khi nền tảng cung cấp đường dẫn phát trực tiếp. Trình xem tự phát nếu trình duyệt cho phép; nếu bị chặn sẽ thử phát tắt tiếng, hoặc bạn bấm ▶. Video xem trước ưu tiên MP4 khoảng 720p; nguồn có thể hết hạn hoặc không cho phát từ trình duyệt.
 
-Trong **Thư viện**, bấm **Xem** để phát video/ảnh đã lưu trên Ubuntu, hoặc **Tải về** để sao chép file về PC/điện thoại. Nơi lưu bản sao do trình duyệt và cài đặt của thiết bị quyết định (trên iPhone thường là ứng dụng Tệp/Downloads). File gốc vẫn nằm ở `data/downloads/` trên Ubuntu. MP4/MOV/JPG/PNG/WEBP thường xem được; MKV hoặc codec lạ có thể cần tải về rồi mở bằng ứng dụng phù hợp.
+Trong **Hàng đợi**, mỗi tác vụ hoàn tất có file và nút **Xem**/**Tải về**. File tải từ phiên bản cũ nằm cùng trang dưới nhãn “File đã tải trước bản này”. Ngày giờ trên file lấy từ thời điểm file được lưu, theo múi giờ của thiết bị đang xem. Nơi lưu bản sao do trình duyệt và cài đặt thiết bị quyết định (trên iPhone thường là ứng dụng Tệp/Downloads). File gốc vẫn nằm ở `data/downloads/` trên Ubuntu. MP4/MOV/JPG/PNG/WEBP thường xem được; MKV hoặc codec lạ có thể cần tải về rồi mở bằng ứng dụng phù hợp.
 
 ## Khi TikTok báo cần đăng nhập
 

@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import time
 import uuid
+import mimetypes
 from pathlib import Path
 from urllib.parse import urlparse, quote, parse_qs
 
@@ -54,11 +55,43 @@ def init_db():
           message TEXT DEFAULT '', attempts INTEGER DEFAULT 0,
           created REAL NOT NULL, updated REAL NOT NULL)''')
         c.execute("UPDATE jobs SET status='queued', message='Tiếp tục sau khi khởi động lại' WHERE status='running'")
+        c.execute('''CREATE TABLE IF NOT EXISTS job_files (
+          job_id TEXT NOT NULL, name TEXT NOT NULL,
+          PRIMARY KEY(job_id, name))''')
 
 
 def rows():
     with conn() as c:
-        return [dict(x) for x in c.execute('SELECT * FROM jobs ORDER BY created DESC LIMIT 500')]
+        jobs = [dict(x) for x in c.execute('SELECT * FROM jobs ORDER BY created DESC LIMIT 500')]
+        attached = {}
+        for row in c.execute('SELECT job_id, name FROM job_files'):
+            attached.setdefault(row['job_id'], []).append(row['name'])
+        for job in jobs:
+            job['files'] = [media_entry(DOWNLOADS / name) for name in attached.get(job['id'], [])
+                            if safe_media_path(name)]
+        return jobs
+
+
+def safe_media_path(name):
+    path = (DOWNLOADS / name).resolve()
+    return (path.is_relative_to(DOWNLOADS) and path.is_file() and not path.is_symlink()
+            and path.suffix.lower() in VIDEO_EXT | IMAGE_EXT)
+
+
+def media_entry(path):
+    stat = path.stat()
+    name = path.relative_to(DOWNLOADS).as_posix()
+    return {'name': name, 'title': path.name,
+            'kind': 'video' if path.suffix.lower() in VIDEO_EXT else 'image',
+            'size': stat.st_size, 'modified': stat.st_mtime,
+            'url': '/api/media/file/' + quote(name, safe='/')}
+
+
+def folder_media(job):
+    destination = DOWNLOADS / job['platform'] / job['folder']
+    return {p.relative_to(DOWNLOADS).as_posix(): (p.stat().st_size, p.stat().st_mtime_ns)
+            for p in destination.rglob('*') if p.is_file() and not p.is_symlink()
+            and p.suffix.lower() in VIDEO_EXT | IMAGE_EXT}
 
 
 def update(jid, **fields):
@@ -133,12 +166,14 @@ async def facebook_items(url, limit):
     if proc.returncode:
         raise HTTPException(422, err.decode(errors='replace')[-450:] or 'Không đọc được Reels Facebook')
     try:
-        urls = json.loads(out)['urls']
+        result = json.loads(out)
+        items = result.get('items') if 'items' in result else [{'url': url, 'thumbnail': ''} for url in result.get('urls', [])]
     except (ValueError, KeyError):
         raise HTTPException(502, 'Danh sách Reels không hợp lệ')
-    if not urls:
+    if not items:
         raise HTTPException(422, 'Không thấy Reel nào. Kiểm tra cookie Facebook còn hạn và Trang có Reels công khai.')
-    return urls
+    return [{'url': item['url'], 'title': item.get('title') or 'Reel ' + item['url'].rstrip('/').split('/')[-1],
+             'thumbnail': item.get('thumbnail') or ''} for item in items[:limit]]
 
 
 def cookie_file(platform):
@@ -208,11 +243,7 @@ def media(_: None = Depends(auth)):
         if not path.is_file() or path.is_symlink() or path.suffix.lower() not in VIDEO_EXT | IMAGE_EXT:
             continue
         try:
-            stat = path.stat()
-            name = path.relative_to(DOWNLOADS).as_posix()
-            files.append({'name': name, 'title': path.name, 'kind': 'video' if path.suffix.lower() in VIDEO_EXT else 'image',
-                          'size': stat.st_size, 'modified': stat.st_mtime,
-                          'url': '/api/media/file/' + quote(name, safe='/')})
+            files.append(media_entry(path))
         except OSError:
             continue
     files.sort(key=lambda item: item['modified'], reverse=True)
@@ -226,7 +257,8 @@ def media_file(name: str, download: bool = False, _: None = Depends(auth)):
         raise HTTPException(404, 'Không tìm thấy file')
     # The source file stays on Ubuntu. Browser download is a copy.
     return FileResponse(path, filename=path.name if download else None,
-                        content_disposition_type='attachment' if download else 'inline')
+                        content_disposition_type='attachment' if download else 'inline',
+                        media_type=mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
 
 
 class Preview(BaseModel):
@@ -277,10 +309,9 @@ async def scan(payload: Scan, _: None = Depends(auth)):
     platform = platform_of(payload.url)
     if platform == 'Facebook':
         url = facebook_reels_url(payload.url)
-        urls = await facebook_items(url, payload.limit)
+        items = await facebook_items(url, payload.limit)
         return {'platform': platform, 'channel': 'Facebook Reels',
-                'items': [{'url': link, 'title': 'Reel ' + link.rstrip('/').split('/')[-1], 'thumbnail': ''} for link in urls],
-                'limited': len(urls) >= payload.limit}
+                'items': items, 'limited': len(items) >= payload.limit}
     # Never resolve arbitrary domains or run a shell. yt-dlp may follow platform redirects.
     cmd = ['yt-dlp', '--dump-single-json', '--flat-playlist', '--playlist-end', str(payload.limit), '--no-warnings', '--no-download']
     if cookies := cookie_file(platform):
@@ -312,7 +343,9 @@ async def scan(payload: Scan, _: None = Depends(auth)):
             platform_of(link)
         except HTTPException:
             continue
-        items.append({'url': link, 'title': entry.get('title') or entry.get('id') or 'Video', 'thumbnail': entry.get('thumbnail') or ''})
+        thumbs = entry.get('thumbnails') or []
+        thumbnail = entry.get('thumbnail') or next((t.get('url') for t in reversed(thumbs) if isinstance(t, dict) and t.get('url')), '')
+        items.append({'url': link, 'title': entry.get('title') or entry.get('id') or 'Video', 'thumbnail': thumbnail})
     return {'platform': platform, 'channel': data.get('channel') or data.get('uploader') or data.get('title') or platform, 'items': items, 'limited': len(items) >= payload.limit}
 
 
@@ -397,22 +430,23 @@ def command_for(job):
 
 async def run_job(job):
     jid = job['id']
+    before = folder_media(job)
     update(jid, status='running', attempts=job['attempts'] + 1, message='Đang tải')
     log = []
     try:
         cmd = command_for(job)
         if job['engine'] == 'facebook-reels':
             update(jid, message='Đang quét Reels Facebook (có thể mất vài phút)')
-            urls = await facebook_items(job['url'], 2000)
+            items = await facebook_items(job['url'], 2000)
             if paused:
                 update(jid, status='queued', message='Hàng đợi tạm dừng; sẽ quét lại')
                 return
             if get_job(jid)['status'] != 'running':
                 return
             list_path = ROOT / ('facebook-reels-' + jid + '.txt')
-            list_path.write_text('\n'.join(urls) + '\n', encoding='utf-8')
+            list_path.write_text('\n'.join(item['url'] for item in items) + '\n', encoding='utf-8')
             cmd = cmd[:-1] + ['-a', str(list_path)]
-            update(jid, message=f'Đã tìm {len(urls)} Reels; đang tải')
+            update(jid, message=f'Đã tìm {len(items)} Reels; đang tải')
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
         active[jid] = proc
         while line := await proc.stdout.readline():
@@ -429,6 +463,12 @@ async def run_job(job):
         if current['status'] != 'running':
             return
         if code == 0:
+            after = folder_media(job)
+            changed = [name for name, signature in after.items() if before.get(name) != signature]
+            if changed:
+                with conn() as c:
+                    c.executemany('INSERT OR IGNORE INTO job_files (job_id,name) VALUES (?,?)',
+                                  [(jid, name) for name in changed])
             update(jid, status='done', progress=100, message='Hoàn tất')
         else:
             msg = '\n'.join(log)[-500:] or f'Bộ tải thoát mã {code}'
