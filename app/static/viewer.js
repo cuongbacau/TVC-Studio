@@ -23,7 +23,7 @@
     else {
       const video = document.createElement('video'); video.controls = true; video.playsInline = true;
       video.preload = 'metadata'; video.src = url;
-      video.onerror = () => { byId('viewerHint').textContent = 'Nguồn này không phát trực tiếp được. Hãy tải file về Ubuntu rồi xem trong Thư viện.'; };
+      video.onerror = () => { byId('viewerHint').textContent = 'Nguồn từ chối phát qua Ubuntu hoặc codec không hỗ trợ. Hãy thử video khác hoặc xem file đã tải trong Thư viện.'; };
       body.append(video);
     }
     if (!dialog.open) dialog.showModal();

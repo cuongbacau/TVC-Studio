@@ -66,7 +66,7 @@ Kiểm tra: `sudo docker compose logs -f --tail=80`. Cập nhật yt-dlp/F2: `su
 
 ## Xem và tải về PC/điện thoại
 
-Ở danh sách quét kênh, bấm **Xem** để xem thử video hoặc ảnh khi nền tảng cung cấp đường dẫn phát trực tiếp. Nếu bị chặn, tải về Ubuntu rồi xem trong **Thư viện**. Video xem trước ưu tiên MP4 khoảng 720p; nguồn có thể hết hạn hoặc không cho phát từ trình duyệt.
+Ở danh sách quét kênh, bấm **Xem** để xem thử video hoặc ảnh khi nền tảng cung cấp đường dẫn phát trực tiếp. Video xem trước đi qua Ubuntu và hỗ trợ tua mà không cần tải cả file về PC trước. Video ưu tiên MP4 khoảng 720p; nguồn có thể hết hạn, đòi cookie, hoặc dùng codec không được trình duyệt hỗ trợ. Khi đó hãy xem file đã tải trong **Thư viện**.
 
 Trong **Thư viện**, bấm **Xem** để phát video/ảnh đã lưu trên Ubuntu, hoặc **Tải về** để sao chép file về PC/điện thoại. Nơi lưu bản sao do trình duyệt và cài đặt của thiết bị quyết định (trên iPhone thường là ứng dụng Tệp/Downloads). File gốc vẫn nằm ở `data/downloads/` trên Ubuntu. MP4/MOV/JPG/PNG/WEBP thường xem được; MKV hoặc codec lạ có thể cần tải về rồi mở bằng ứng dụng phù hợp.
 
@@ -81,3 +81,5 @@ chmod 600 ~/TVC-Studio/data/cookies/tiktok.txt
 ```
 
 File phải bắt đầu `# Netscape HTTP Cookie File` hoặc `# HTTP Cookie File`. Không cần rebuild khi thay cookie; quét lại link trên web. Nếu vẫn bị chặn, phiên cookie có thể hết hạn hoặc nền tảng hạn chế chính video đó. Không dán nội dung cookie vào GitHub/chat.
+
+Docker dùng `.dockerignore` để bỏ qua `data/` và `.env` trong ngữ cảnh build; hãy giữ file này ở gốc repo GitHub, nhất là khi thư viện video lớn dần.
