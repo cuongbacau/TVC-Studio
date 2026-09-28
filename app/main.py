@@ -88,6 +88,36 @@ def platform_of(url):
     raise HTTPException(422, 'Chỉ nhận link Douyin, TikTok, Facebook hoặc YouTube')
 
 
+def cookie_file(platform):
+    path = ROOT / 'cookies' / (platform.lower() + '.txt')
+    if path.is_file() and path.stat().st_size > 0:
+        return path
+    return None
+
+
+def f2_cookie(platform):
+    path = cookie_file(platform)
+    if not path:
+        return None
+    hosts = {'TikTok': ('tiktok.com',), 'Douyin': ('douyin.com',)}.get(platform, ())
+    values = {}
+    for line in path.read_text(encoding='utf-8').splitlines():
+        if line.startswith('#HttpOnly_'):
+            line = line[len('#HttpOnly_'):]
+        elif line.startswith('#'):
+            continue
+        parts = line.split('\t')
+        if len(parts) != 7:
+            continue
+        domain, _, _, _, expiry, name, value = parts
+        if not any(domain.lstrip('.') == host or domain.lstrip('.').endswith('.' + host) for host in hosts):
+            continue
+        if expiry.isdigit() and int(expiry) and int(expiry) < time.time():
+            continue
+        values[name] = value
+    return '; '.join(f'{k}={v}' for k, v in values.items()) or None
+
+
 def folder_name(value):
     value = re.sub(r'[^\w .-]', '_', value, flags=re.UNICODE).strip(' .')[:80]
     if not value or value in ('.', '..'):
@@ -127,7 +157,10 @@ def jobs(_: None = Depends(auth)):
 async def scan(payload: Scan, _: None = Depends(auth)):
     platform = platform_of(payload.url)
     # Never resolve arbitrary domains or run a shell. yt-dlp may follow platform redirects.
-    cmd = ['yt-dlp', '--dump-single-json', '--flat-playlist', '--playlist-end', str(payload.limit), '--no-warnings', '--no-download', payload.url]
+    cmd = ['yt-dlp', '--dump-single-json', '--flat-playlist', '--playlist-end', str(payload.limit), '--no-warnings', '--no-download']
+    if cookies := cookie_file(platform):
+        cmd += ['--cookies', str(cookies)]
+    cmd.append(payload.url)
     try:
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         out, err = await asyncio.wait_for(proc.communicate(), timeout=90)
@@ -222,9 +255,15 @@ def command_for(job):
     if job['engine'] == 'f2':
         alias = 'dy' if job['platform'] == 'Douyin' else 'tk'
         mode = 'post' if job['mode'] == 'channel' else 'one'
-        return ['f2', alias, '-M', mode, '-u', job['url'], '-p', str(destination)]
+        cmd = ['f2', alias, '-M', mode, '-u', job['url'], '-p', str(destination)]
+        if cookie := f2_cookie(job['platform']):
+            cmd += ['-k', cookie]
+        return cmd
     archive = ROOT / 'archive.txt'
-    return ['yt-dlp', '--newline', '--no-warnings', '--continue', '--download-archive', str(archive), '--retries', '5', '--fragment-retries', '5', '-o', str(destination / '%(upload_date)s_%(id)s_%(title).100B.%(ext)s'), job['url']]
+    cmd = ['yt-dlp', '--newline', '--no-warnings', '--continue', '--download-archive', str(archive), '--retries', '5', '--fragment-retries', '5']
+    if cookies := cookie_file(job['platform']):
+        cmd += ['--cookies', str(cookies)]
+    return cmd + ['-o', str(destination / '%(upload_date)s_%(id)s_%(title).100B.%(ext)s'), job['url']]
 
 
 async def run_job(job):

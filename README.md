@@ -60,6 +60,18 @@ Kiểm tra: `sudo docker compose logs -f --tail=80`. Cập nhật yt-dlp/F2: `su
 
 ## Lưu ý
 
-- Một số kênh Douyin/TikTok yêu cầu cookie đăng nhập. Bản đầu chưa có ô nhập cookie để tránh lưu phiên đăng nhập trong giao diện web; nếu cần, cấu hình F2 trong container theo tài liệu F2 và mount cấu hình riêng, hoặc nâng cấp phần quản lý cookie sau.
+- Một số kênh Douyin/TikTok yêu cầu cookie đăng nhập. Nếu TikTok/Douyin yêu cầu xác thực, đặt cookie dạng Netscape tại `data/cookies/tiktok.txt` hoặc `data/cookies/douyin.txt`. Ứng dụng tự đưa file đó vào yt-dlp khi quét/tải, và chuyển cookie tương ứng cho F2 khi tải kênh. Cookie là phiên đăng nhập: không gửi trong chat, không đưa lên GitHub, chỉ dùng trên máy chủ tin cậy. Xuất cookie bằng yt-dlp trên PC đã đăng nhập (xem phần dưới).
 - Các trang thay đổi thường xuyên; lỗi quét/tải do xác thực hay hạn chế nền tảng hiện ở hàng đợi. Không có bảo đảm quét hết video nếu nền tảng giới hạn phân trang.
 - Chỉ tải nội dung bạn có quyền lưu và sử dụng.
+
+## Khi TikTok báo cần đăng nhập
+
+Trên PC đã đăng nhập TikTok bằng Chrome, có thể cài yt-dlp và chạy `yt-dlp --cookies-from-browser chrome --cookies tiktok.txt` để xuất cookie theo định dạng Netscape. Nếu dùng Edge, thay `chrome` bằng `edge`. Chuyển file sang Ubuntu (thay IP nếu máy thay đổi):
+
+```bash
+mkdir -p ~/TVC-Studio/data/cookies
+# Chạy trên PC với scp: scp tiktok.txt cuong@192.168.1.13:~/TVC-Studio/data/cookies/tiktok.txt
+chmod 600 ~/TVC-Studio/data/cookies/tiktok.txt
+```
+
+File phải bắt đầu `# Netscape HTTP Cookie File` hoặc `# HTTP Cookie File`. Không cần rebuild khi thay cookie; quét lại link trên web. Nếu vẫn bị chặn, phiên cookie có thể hết hạn hoặc nền tảng hạn chế chính video đó. Không dán nội dung cookie vào GitHub/chat.
