@@ -18,8 +18,10 @@ function enteredUrl() {
 }
 function updateSourceHelp() {
   const value = enteredUrl();
+  const shortFacebook = /facebook\.com\/share\/[rv]\//i.test(value);
+  $('resolveBtn').hidden = !shortFacebook;
   const label = /douyin\.com/i.test(value) ? 'Douyin' : /tiktok\.com/i.test(value) ? 'TikTok' : /(facebook\.com|fb\.watch)/i.test(value) ? 'Facebook' : /youtu\.?be/i.test(value) ? 'YouTube' : '';
-  $('sourceHelp').textContent = label ? 'Đã nhận link ' + label + '. ' + (label === 'Facebook' ? 'Dùng link tab Reels của Trang để Quét kênh hoặc Tải cả kênh; link /share/r/ chỉ tải một video.' : 'Bấm Quét kênh để xem trước, hoặc Thêm URL tải nếu đây là một video.') : 'Bấm mẫu để điền đầu link kênh, rồi thêm tên hoặc ID. Có thể dán nguyên đoạn chia sẻ chứa link.';
+  $('sourceHelp').textContent = shortFacebook ? 'Link chia sẻ video Facebook: bấm Giải mã link để xem Reel gốc, hoặc Thêm URL tải để tự giải mã rồi tải.' : label ? 'Đã nhận link ' + label + '. ' + (label === 'Facebook' ? 'Dùng link tab Reels của Trang để Quét kênh hoặc Tải cả kênh.' : 'Bấm Quét kênh để xem trước, hoặc Thêm URL tải nếu đây là một video.') : 'Bấm mẫu để điền đầu link kênh, rồi thêm tên hoặc ID. Có thể dán nguyên đoạn chia sẻ chứa link.';
 }
 document.querySelectorAll('[data-example]').forEach(button => button.onclick = () => { $('url').value = button.dataset.example; $('url').focus(); updateSourceHelp(); });
 $('url').addEventListener('input', updateSourceHelp);
@@ -27,12 +29,26 @@ $('url').addEventListener('paste', () => setTimeout(() => { const url = enteredU
 function folder() { return $('folder').value.trim(); }
 async function add(url, mode = 'video', title = '', quiet = false) {
   try {
+    if (mode === 'video' && /facebook\.com\/share\/[rv]\//i.test(url)) {
+      note('Đang giải mã link Facebook…');
+      const decoded = await api('/resolve', 'POST', {url});
+      if (enteredUrl() === url) { $('url').value = decoded.url; updateSourceHelp(); }
+      url = decoded.url;
+    }
     const value = await api('/jobs', 'POST', {url, mode, title, folder:folder(), engine:'auto'});
     if (!quiet) note(value.duplicate ? 'Link này đã nằm trong hàng đợi.' : 'Đã thêm vào hàng đợi.');
     await refresh(); return true;
   } catch (error) { note(error.message, true); return false; }
 }
 $('singleBtn').onclick = () => enteredUrl() ? add(enteredUrl()) : note('Dán URL video trước.', true);
+$('resolveBtn').onclick = async () => {
+  const url = enteredUrl(); $('resolveBtn').disabled = true; note('Đang giải mã link Facebook…');
+  try {
+    const decoded = await api('/resolve', 'POST', {url});
+    $('url').value = decoded.url; updateSourceHelp(); note(decoded.resolved ? 'Đã tìm thấy link Reel gốc: ' + decoded.url : 'Link này đã là link gốc.');
+  } catch (error) { note(error.message, true); }
+  finally { $('resolveBtn').disabled = false; }
+};
 $('channelBtn').onclick = () => enteredUrl() ? add(enteredUrl(), 'channel', 'Tải cả kênh') : note('Dán URL kênh trước.', true);
 $('scanBtn').onclick = async () => {
   const url = enteredUrl(); if (!url) return note('Dán URL kênh trước.', true); if (busy) return;

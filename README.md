@@ -8,6 +8,8 @@ Bản 0.5.3: quét tab Reels Facebook theo link dạng `https://www.facebook.com
 
 Bản 0.5.4: giao diện co giãn cho PC/điện thoại; kết quả quét có số thứ tự, ảnh thu nhỏ khi nguồn cung cấp và Chọn tất cả. Trình xem thử phát ngay sau khi bấm Xem nếu trình duyệt cho phép. Hàng đợi hiển thị số thứ tự, ngày giờ hoàn tất và file của từng tác vụ kèm Xem/Tải về; file cũ chưa gắn tác vụ cũng nằm ở cuối Hàng đợi. Nút Chọn tất cả ở Hàng đợi cho phép tải nhiều file về thiết bị (trình duyệt có thể hỏi quyền tải nhiều file). Trình quét Reels Facebook lấy ảnh từ lưới Reels khi trang trả ảnh.
 
+Bản 0.5.5: khi dán link Facebook `/share/r/…` hoặc `/share/v/…`, bấm **Giải mã link Facebook** để xem link gốc; nút **+ Thêm URL tải** tự giải mã trước khi xếp hàng. Tác vụ cũ mang link chia sẻ cũng tự giải mã lúc chạy. Nếu yt-dlp báo lỗi với Reel đã giải mã và có cookie Facebook, ứng dụng thử lại một lần bằng chế độ giả lập Chrome. Bản này cài thêm phần hỗ trợ `curl-cffi` cho yt-dlp. Facebook có thể vẫn hạn chế Reel cụ thể, kể cả khi link gốc và cookie hợp lệ; lỗi cuối cùng hiện trong Hàng đợi.
+
 ## Cài trên Ubuntu
 
 Cần Docker Engine và Docker Compose plugin. Giải nén, vào thư mục `tvc-downloader`, rồi:
@@ -56,7 +58,7 @@ Script kiểm tra gói, sao lưu mã nguồn cũ trong `.updates/`, thay mã, ch
 
 ## Dùng
 
-1. Bấm mẫu link Douyin/TikTok/Facebook để điền đầu link kênh, thêm tên/ID, rồi bấm **Quét kênh** để xem tối đa 30–200 video. Hoặc bấm **Tải cả kênh**. Với Facebook, dùng URL tab Reels của Trang; link `/share/r/…` là một video và chỉ dùng **+ Thêm URL tải**. Có thể dán nguyên đoạn chia sẻ Douyin: ứng dụng tự tách link. Quét Douyin vẫn phụ thuộc khả năng yt-dlp và cookie; nếu không quét được, dùng **Tải cả kênh** với F2.
+1. Bấm mẫu link Douyin/TikTok/Facebook để điền đầu link kênh, thêm tên/ID, rồi bấm **Quét kênh** để xem tối đa 30–200 video. Hoặc bấm **Tải cả kênh**. Với Facebook, dùng URL tab Reels của Trang; link `/share/r/…` là một video: bấm **Giải mã link Facebook** hoặc **+ Thêm URL tải**. Có thể dán nguyên đoạn chia sẻ Douyin: ứng dụng tự tách link. Quét Douyin vẫn phụ thuộc khả năng yt-dlp và cookie; nếu không quét được, dùng **Tải cả kênh** với F2.
 2. Với URL video riêng, bấm **+ Thêm URL tải**.
 3. Đặt **Thư mục lưu** trước khi thêm tác vụ. File ở `data/downloads/<Nền tảng>/<Thư mục>` trên Ubuntu. Mỗi kênh nên đặt tên thư mục riêng.
 4. Hàng đợi vẫn chạy khi đóng trang; khởi động lại container thì tác vụ đang chạy được xếp lại. Các tác vụ hoàn tất lưu dấu qua `data/archive.txt` đối với yt-dlp. F2 quản lý file trùng theo cơ chế riêng của F2.

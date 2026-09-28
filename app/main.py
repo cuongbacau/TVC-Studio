@@ -9,8 +9,12 @@ import sys
 import time
 import uuid
 import mimetypes
+import html
+from html.parser import HTMLParser
+from http.cookiejar import MozillaCookieJar
 from pathlib import Path
-from urllib.parse import urlparse, quote, parse_qs
+from urllib.parse import urlparse, quote, parse_qs, urljoin
+from urllib.request import build_opener, HTTPCookieProcessor, HTTPRedirectHandler, Request as URLRequest
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import FileResponse
@@ -132,6 +136,82 @@ def clean_url(value):
     url = match.group(0).rstrip('.,;:!?)]}，。！？；、）》】')
     platform_of(url)
     return url
+
+
+def is_facebook_share(url):
+    parsed = urlparse(url)
+    return (platform_of(url) == 'Facebook' and
+            bool(re.fullmatch(r'/share/[rv]/[A-Za-z0-9]+/?', parsed.path)))
+
+
+def canonical_facebook_video(url):
+    parsed = urlparse(html.unescape(url).replace('\\/', '/'))
+    host = (parsed.hostname or '').lower()
+    if host != 'facebook.com' and not host.endswith('.facebook.com'):
+        return None
+    match = re.search(r'/(?:reel|reels|videos)/(\d{6,})(?:/|$)', parsed.path)
+    if match:
+        return f'https://www.facebook.com/reel/{match.group(1)}/'
+    if parsed.path.rstrip('/') in ('/watch', '/watch/'):
+        video_id = parse_qs(parsed.query).get('v', [''])[0]
+        if re.fullmatch(r'\d{6,}', video_id):
+            return f'https://www.facebook.com/reel/{video_id}/'
+    return None
+
+
+class FacebookCanonical(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.urls = []
+
+    def handle_starttag(self, tag, attrs):
+        props = dict(attrs)
+        if tag == 'meta' and props.get('property') in ('og:url', 'al:web:url'):
+            self.urls.append(props.get('content', ''))
+        if tag == 'link' and props.get('rel') == 'canonical':
+            self.urls.append(props.get('href', ''))
+        if tag == 'meta' and props.get('http-equiv', '').lower() == 'refresh':
+            match = re.search(r'url\s*=\s*[\'\"]?([^\'\"]+)', props.get('content', ''), flags=re.IGNORECASE)
+            if match:
+                self.urls.append(match.group(1))
+
+
+class FacebookRedirects(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        host = (urlparse(newurl).hostname or '').lower()
+        if host != 'facebook.com' and not host.endswith('.facebook.com'):
+            raise HTTPException(422, 'Facebook chuyển hướng ra ngoài Facebook')
+        return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+def resolve_facebook_share(url):
+    url = clean_url(url)
+    if not is_facebook_share(url):
+        return url
+    cookies = cookie_file('Facebook')
+    jar = MozillaCookieJar(str(cookies)) if cookies else MozillaCookieJar()
+    if cookies:
+        try:
+            jar.load(ignore_discard=True, ignore_expires=False)
+        except Exception:
+            raise HTTPException(422, 'Cookie Facebook không đúng định dạng Netscape')
+    opener = build_opener(HTTPCookieProcessor(jar), FacebookRedirects())
+    request = URLRequest(url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'})
+    try:
+        with opener.open(request, timeout=15) as response:
+            canonical = canonical_facebook_video(response.geturl())
+            if canonical:
+                return canonical
+            parser = FacebookCanonical()
+            parser.feed(response.read(500_000).decode('utf-8', errors='replace'))
+            for candidate in parser.urls:
+                if canonical := canonical_facebook_video(urljoin(response.geturl(), candidate)):
+                    return canonical
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(422, f'Không giải mã được link Facebook: {str(exc)[:130]}')
+    raise HTTPException(422, 'Facebook chưa trả link Reel gốc. Kiểm tra cookie Facebook hoặc mở link xem còn hoạt động.')
 
 
 def facebook_reels_url(url):
@@ -265,9 +345,20 @@ class Preview(BaseModel):
     url: str
 
 
+@app.post('/api/resolve')
+async def resolve(payload: Preview, _: None = Depends(auth)):
+    url = clean_url(payload.url)
+    if not is_facebook_share(url):
+        return {'url': url, 'resolved': False}
+    canonical = await asyncio.to_thread(resolve_facebook_share, url)
+    return {'url': canonical, 'resolved': True}
+
+
 @app.post('/api/preview')
 async def preview(payload: Preview, _: None = Depends(auth)):
     payload.url = clean_url(payload.url)
+    if is_facebook_share(payload.url):
+        payload.url = await asyncio.to_thread(resolve_facebook_share, payload.url)
     platform = platform_of(payload.url)
     cmd = ['yt-dlp', '--dump-single-json', '--no-playlist', '--no-warnings', '--skip-download']
     if cookies := cookie_file(platform):
@@ -434,6 +525,12 @@ async def run_job(job):
     update(jid, status='running', attempts=job['attempts'] + 1, message='Đang tải')
     log = []
     try:
+        if job['mode'] == 'video' and is_facebook_share(job['url']):
+            update(jid, message='Đang giải mã link chia sẻ Facebook')
+            job['url'] = await asyncio.to_thread(resolve_facebook_share, job['url'])
+            if get_job(jid)['status'] != 'running' or paused:
+                return
+            update(jid, url=job['url'], message='Đã giải mã link; đang tải Reel')
         cmd = command_for(job)
         if job['engine'] == 'facebook-reels':
             update(jid, message='Đang quét Reels Facebook (có thể mất vài phút)')
@@ -447,18 +544,25 @@ async def run_job(job):
             list_path.write_text('\n'.join(item['url'] for item in items) + '\n', encoding='utf-8')
             cmd = cmd[:-1] + ['-a', str(list_path)]
             update(jid, message=f'Đã tìm {len(items)} Reels; đang tải')
-        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
-        active[jid] = proc
-        while line := await proc.stdout.readline():
-            s = line.decode(errors='replace').strip()
-            log.append(s)
-            log = log[-8:]
-            percent = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', s)
-            if percent:
-                update(jid, progress=float(percent.group(1)), message='Đang tải')
-            elif 'ERROR:' in s or 'WARNING:' in s:
-                update(jid, message=s[-240:])
-        code = await proc.wait()
+        async def attempt(args):
+            proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE,
+                                                       stderr=asyncio.subprocess.STDOUT, start_new_session=True)
+            active[jid] = proc
+            while line := await proc.stdout.readline():
+                s = line.decode(errors='replace').strip()
+                log.append(s)
+                del log[:-8]
+                percent = re.search(r'\[download\]\s+(\d+(?:\.\d+)?)%', s)
+                if percent:
+                    update(jid, progress=float(percent.group(1)), message='Đang tải')
+                elif 'ERROR:' in s or 'WARNING:' in s:
+                    update(jid, message=s[-240:])
+            return await proc.wait()
+        code = await attempt(cmd)
+        if (code and job['platform'] == 'Facebook' and job['mode'] == 'video'
+                and cookie_file('Facebook') and get_job(jid)['status'] == 'running' and not paused):
+            update(jid, message='Thử lại Facebook bằng cookie và chế độ trình duyệt', progress=0)
+            code = await attempt(cmd[:1] + ['--impersonate', 'chrome'] + cmd[1:])
         current = get_job(jid)
         if current['status'] != 'running':
             return
