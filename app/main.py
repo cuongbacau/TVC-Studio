@@ -1,20 +1,17 @@
 import asyncio
-import ipaddress
 import json
 import os
 import re
 import secrets
 import signal
-import socket
 import sqlite3
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse, quote, urljoin
+from urllib.parse import urlparse, quote
 
-import httpx
 from fastapi import FastAPI, HTTPException, Depends, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -30,7 +27,6 @@ security = HTTPBasic()
 active = {}
 worker_task = None
 paused = False
-preview_sources = {}
 VIDEO_EXT = {'.mp4', '.webm', '.mov', '.m4v', '.mkv'}
 IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'}
 
@@ -92,6 +88,16 @@ def platform_of(url):
     if host in ('youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'):
         return 'YouTube'
     raise HTTPException(422, 'Chỉ nhận link Douyin, TikTok, Facebook hoặc YouTube')
+
+
+def clean_url(value):
+    # Share sheets (notably Douyin) copy a caption and URL in the same text.
+    match = re.search(r'https?://[^\s\u3000-\u9fff<>"\']+', value, flags=re.IGNORECASE)
+    if not match:
+        raise HTTPException(422, 'Dán link http(s) của video hoặc kênh')
+    url = match.group(0).rstrip('.,;:!?)]}，。！？；、）》】')
+    platform_of(url)
+    return url
 
 
 def cookie_file(platform):
@@ -186,81 +192,9 @@ class Preview(BaseModel):
     url: str
 
 
-def preview_url(url, headers=None):
-    token = secrets.token_urlsafe(24)
-    now = time.time()
-    for key, value in list(preview_sources.items()):
-        if value['expires'] < now:
-            del preview_sources[key]
-    preview_sources[token] = {'url': url, 'headers': headers or {}, 'expires': now + 1200}
-    return '/api/preview/stream/' + token
-
-
-async def check_public_url(url):
-    parsed = urlparse(url)
-    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
-        raise HTTPException(502, 'Nguồn xem trước không hợp lệ')
-    try:
-        addresses = await asyncio.get_running_loop().getaddrinfo(parsed.hostname, 443, type=socket.SOCK_STREAM)
-        if not addresses or any(not ipaddress.ip_address(entry[4][0]).is_global for entry in addresses):
-            raise HTTPException(502, 'Nguồn xem trước không hợp lệ')
-    except socket.gaierror:
-        raise HTTPException(502, 'Không phân giải được nguồn xem trước')
-
-
-@app.get('/api/preview/stream/{token}')
-async def preview_stream(token: str, request: Request, _: None = Depends(auth)):
-    source = preview_sources.get(token)
-    if not source or source['expires'] < time.time():
-        raise HTTPException(404, 'Link xem trước đã hết hạn, hãy bấm Xem lại')
-    headers = {k: v for k, v in source['headers'].items()
-               if k.lower() in ('user-agent', 'referer', 'origin', 'accept') and isinstance(v, str)}
-    if byte_range := request.headers.get('range'):
-        if not re.fullmatch(r'bytes=\d*-\d*', byte_range):
-            raise HTTPException(416, 'Khoảng dữ liệu không hợp lệ')
-        headers['Range'] = byte_range
-    headers['Accept-Encoding'] = 'identity'
-    client = httpx.AsyncClient(timeout=httpx.Timeout(30, read=60), follow_redirects=False, trust_env=False)
-    url = source['url']
-    try:
-        for _ in range(5):
-            await check_public_url(url)
-            upstream = await client.send(client.build_request('GET', url, headers=headers), stream=True)
-            if upstream.status_code not in (301, 302, 303, 307, 308):
-                break
-            location = upstream.headers.get('location')
-            await upstream.aclose()
-            if not location:
-                raise HTTPException(502, 'Nguồn chuyển hướng không hợp lệ')
-            url = urljoin(url, location)
-        else:
-            raise HTTPException(502, 'Nguồn chuyển hướng quá nhiều lần')
-        if upstream.status_code not in (200, 206):
-            await upstream.aclose()
-            raise HTTPException(502, f'Nguồn từ chối phát (HTTP {upstream.status_code})')
-    except httpx.HTTPError as exc:
-        await client.aclose()
-        raise HTTPException(502, 'Không kết nối được nguồn phát qua Ubuntu') from exc
-    except Exception:
-        await client.aclose()
-        raise
-    response_headers = {'Cache-Control': 'private, no-store', 'Accept-Ranges': upstream.headers.get('accept-ranges', 'bytes')}
-    for key in ('content-length', 'content-range'):
-        if key in upstream.headers:
-            response_headers[key.title()] = upstream.headers[key]
-    async def body():
-        try:
-            async for chunk in upstream.aiter_raw():
-                yield chunk
-        finally:
-            await upstream.aclose()
-            await client.aclose()
-    return StreamingResponse(body(), status_code=upstream.status_code,
-                             media_type=upstream.headers.get('content-type', 'video/mp4'), headers=response_headers)
-
-
 @app.post('/api/preview')
 async def preview(payload: Preview, _: None = Depends(auth)):
+    payload.url = clean_url(payload.url)
     platform = platform_of(payload.url)
     cmd = ['yt-dlp', '--dump-single-json', '--no-playlist', '--no-warnings', '--skip-download']
     if cookies := cookie_file(platform):
@@ -286,12 +220,8 @@ async def preview(payload: Preview, _: None = Depends(auth)):
     source = formats[0]['url'] if formats else (info.get('url') if str(info.get('url') or '').startswith('https://') and info.get('ext') == 'mp4' else '')
     photos = [e.get('url') for e in (info.get('entries') or []) if isinstance(e, dict) and str(e.get('url') or '').startswith('https://') and ('.' + str(e.get('ext', '')).lower()) in IMAGE_EXT]
     thumbnail = info.get('thumbnail') or ''
-    if not thumbnail.startswith('https://'):
-        thumbnail = ''
-    headers = info.get('http_headers') or {}
     return {'title': info.get('title') or 'Xem trước', 'kind': 'video' if source else 'image',
-            'url': preview_url(source or (photos[0] if photos else thumbnail), headers) if (source or photos or thumbnail) else '',
-            'images': [preview_url(url, headers) for url in photos],
+            'url': source or (photos[0] if photos else thumbnail), 'images': photos,
             'thumbnail': thumbnail, 'available': bool(source or photos or thumbnail)}
 
 
@@ -302,6 +232,7 @@ def jobs(_: None = Depends(auth)):
 
 @app.post('/api/scan')
 async def scan(payload: Scan, _: None = Depends(auth)):
+    payload.url = clean_url(payload.url)
     platform = platform_of(payload.url)
     # Never resolve arbitrary domains or run a shell. yt-dlp may follow platform redirects.
     cmd = ['yt-dlp', '--dump-single-json', '--flat-playlist', '--playlist-end', str(payload.limit), '--no-warnings', '--no-download']
@@ -340,10 +271,11 @@ async def scan(payload: Scan, _: None = Depends(auth)):
 
 @app.post('/api/jobs')
 def add(payload: Add, _: None = Depends(auth)):
+    payload.url = clean_url(payload.url)
     platform = platform_of(payload.url)
     if payload.mode not in ('video', 'channel'):
         raise HTTPException(422, 'Chế độ không hợp lệ')
-    engine = ('f2' if platform in ('Douyin', 'TikTok') and payload.mode == 'channel' else 'yt-dlp') if payload.engine == 'auto' else payload.engine
+    engine = ('f2' if platform == 'Douyin' or (platform == 'TikTok' and payload.mode == 'channel') else 'yt-dlp') if payload.engine == 'auto' else payload.engine
     if engine not in ('f2', 'yt-dlp') or (engine == 'f2' and platform not in ('Douyin', 'TikTok')):
         raise HTTPException(422, 'Bộ tải không hỗ trợ nền tảng này')
     folder = folder_name(payload.folder or platform)

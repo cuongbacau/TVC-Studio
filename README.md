@@ -1,6 +1,8 @@
 # TVC Downloader
 
-Giao diện web tiếng Việt cho điện thoại và PC, chạy tải video trên Ubuntu. Hỗ trợ URL Douyin, TikTok, Facebook, YouTube. F2 dùng cho tải cả kênh Douyin/TikTok; yt-dlp dùng cho link lẻ và kênh Facebook/YouTube. Danh sách xem trước lấy từ yt-dlp, tùy nền tảng và cookie có thể không quét được. Không có trình duyệt đăng nhập tích hợp.
+Giao diện web tiếng Việt cho điện thoại và PC, chạy tải video trên Ubuntu. Hỗ trợ URL Douyin, TikTok, Facebook, YouTube. F2 dùng cho video lẻ và kênh Douyin, kênh TikTok; yt-dlp dùng cho video lẻ TikTok và Facebook/YouTube. Danh sách xem trước lấy từ yt-dlp, tùy nền tảng và cookie có thể không quét được. Không có trình duyệt đăng nhập tích hợp.
+
+Bản 0.5.2: các ô Hoạt động mở hàng đợi theo trạng thái; ô URL có mẫu link kênh và tự tách URL từ đoạn chia sẻ Douyin; video lẻ Douyin tải bằng F2. Nếu một tác vụ cũ đã báo lỗi, thêm lại link video để tạo tác vụ mới. Nếu F2 vẫn báo lỗi xác thực, xem thông báo ở **Cần kiểm tra** và thiết lập cookie Douyin trên Ubuntu.
 
 ## Cài trên Ubuntu
 
@@ -50,11 +52,12 @@ Script kiểm tra gói, sao lưu mã nguồn cũ trong `.updates/`, thay mã, ch
 
 ## Dùng
 
-1. Dán URL kênh, bấm **Quét kênh** để xem tối đa 30–200 video và chọn video tải. Hoặc bấm **Tải cả kênh** để tải toàn bộ theo bộ tải tương ứng.
+1. Bấm mẫu link Douyin/TikTok/Facebook để điền đầu link kênh, thêm tên/ID, rồi bấm **Quét kênh** để xem tối đa 30–200 video. Hoặc bấm **Tải cả kênh**. Có thể dán nguyên đoạn chia sẻ Douyin: ứng dụng tự tách link. Quét Douyin vẫn phụ thuộc khả năng yt-dlp và cookie; nếu không quét được, dùng **Tải cả kênh** với F2.
 2. Với URL video riêng, bấm **+ Thêm URL tải**.
 3. Đặt **Thư mục lưu** trước khi thêm tác vụ. File ở `data/downloads/<Nền tảng>/<Thư mục>` trên Ubuntu. Mỗi kênh nên đặt tên thư mục riêng.
 4. Hàng đợi vẫn chạy khi đóng trang; khởi động lại container thì tác vụ đang chạy được xếp lại. Các tác vụ hoàn tất lưu dấu qua `data/archive.txt` đối với yt-dlp. F2 quản lý file trùng theo cơ chế riêng của F2.
 5. **Tạm dừng** tác vụ đang tải sẽ ngắt tiến trình. **Tiếp tục** sẽ gọi lại bộ tải; yt-dlp dùng file `.part` để tiếp tục khi nguồn hỗ trợ. F2 có thể phải kiểm tra lại danh sách của kênh.
+6. Bấm số **Đang chờ**, **Đang tải**, **Hoàn tất** hoặc **Cần kiểm tra** để mở danh sách tác vụ tương ứng. Bấm **Xem tất cả** để bỏ lọc.
 
 Kiểm tra: `sudo docker compose logs -f --tail=80`. Cập nhật yt-dlp/F2: `sudo docker compose build --pull --no-cache && sudo docker compose up -d`. Sao lưu cả thư mục `data` để giữ video, hàng đợi và dấu chống trùng.
 
@@ -66,7 +69,7 @@ Kiểm tra: `sudo docker compose logs -f --tail=80`. Cập nhật yt-dlp/F2: `su
 
 ## Xem và tải về PC/điện thoại
 
-Ở danh sách quét kênh, bấm **Xem** để xem thử video hoặc ảnh khi nền tảng cung cấp đường dẫn phát trực tiếp. Video xem trước đi qua Ubuntu và hỗ trợ tua mà không cần tải cả file về PC trước. Video ưu tiên MP4 khoảng 720p; nguồn có thể hết hạn, đòi cookie, hoặc dùng codec không được trình duyệt hỗ trợ. Khi đó hãy xem file đã tải trong **Thư viện**.
+Ở danh sách quét kênh, bấm **Xem** để xem thử video hoặc ảnh khi nền tảng cung cấp đường dẫn phát trực tiếp. Nếu bị chặn, tải về Ubuntu rồi xem trong **Thư viện**. Video xem trước ưu tiên MP4 khoảng 720p; nguồn có thể hết hạn hoặc không cho phát từ trình duyệt.
 
 Trong **Thư viện**, bấm **Xem** để phát video/ảnh đã lưu trên Ubuntu, hoặc **Tải về** để sao chép file về PC/điện thoại. Nơi lưu bản sao do trình duyệt và cài đặt của thiết bị quyết định (trên iPhone thường là ứng dụng Tệp/Downloads). File gốc vẫn nằm ở `data/downloads/` trên Ubuntu. MP4/MOV/JPG/PNG/WEBP thường xem được; MKV hoặc codec lạ có thể cần tải về rồi mở bằng ứng dụng phù hợp.
 
@@ -81,5 +84,3 @@ chmod 600 ~/TVC-Studio/data/cookies/tiktok.txt
 ```
 
 File phải bắt đầu `# Netscape HTTP Cookie File` hoặc `# HTTP Cookie File`. Không cần rebuild khi thay cookie; quét lại link trên web. Nếu vẫn bị chặn, phiên cookie có thể hết hạn hoặc nền tảng hạn chế chính video đó. Không dán nội dung cookie vào GitHub/chat.
-
-Docker dùng `.dockerignore` để bỏ qua `data/` và `.env` trong ngữ cảnh build; hãy giữ file này ở gốc repo GitHub, nhất là khi thư viện video lớn dần.
