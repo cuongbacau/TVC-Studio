@@ -23,7 +23,7 @@ function updateSourceHelp() {
   const shortFacebook = /facebook\.com\/share\/[rv]\//i.test(value);
   $('resolveBtn').hidden = !shortFacebook;
   const label = /douyin\.com/i.test(value) ? 'Douyin' : /tiktok\.com/i.test(value) ? 'TikTok' : /(facebook\.com|fb\.watch)/i.test(value) ? 'Facebook' : /youtu\.?be/i.test(value) ? 'YouTube' : '';
-  $('sourceHelp').textContent = shortFacebook ? 'Link chia sẻ video Facebook: bấm Giải mã link để xem Reel gốc, hoặc Thêm URL tải để tự giải mã rồi tải.' : label ? 'Đã nhận link ' + label + '. ' + (label === 'Facebook' ? 'Dùng link tab Reels của Trang để Quét kênh hoặc Tải cả kênh.' : 'Bấm Quét kênh để xem trước, hoặc Thêm URL tải nếu đây là một video.') : 'Bấm mẫu để điền đầu link kênh, rồi thêm tên hoặc ID. Có thể dán nguyên đoạn chia sẻ chứa link.';
+  $('sourceHelp').textContent = shortFacebook ? 'Link chia sẻ Facebook: chọn Tải một video riêng; ứng dụng tự giải mã khi tải.' : label ? 'Đã nhận link ' + label + '. Chọn cách quét kênh hoặc tải một video ở ô Chế độ.' : 'Bấm mẫu để điền đầu link kênh, rồi thêm tên hoặc ID. Có thể dán nguyên đoạn chia sẻ chứa link.';
 }
 document.querySelectorAll('[data-example]').forEach(button => button.onclick = () => { $('url').value = button.dataset.example; $('url').focus(); updateSourceHelp(); });
 $('url').addEventListener('input', updateSourceHelp);
@@ -42,7 +42,6 @@ async function add(url, mode = 'video', title = '', quiet = false) {
     await refresh(); return true;
   } catch (error) { note(error.message, true); return false; }
 }
-$('singleBtn').onclick = () => enteredUrl() ? add(enteredUrl()) : note('Dán URL video trước.', true);
 $('resolveBtn').onclick = async () => {
   const url = enteredUrl(); $('resolveBtn').disabled = true; note('Đang giải mã link Facebook…');
   try {
@@ -51,18 +50,39 @@ $('resolveBtn').onclick = async () => {
   } catch (error) { note(error.message, true); }
   finally { $('resolveBtn').disabled = false; }
 };
-$('channelBtn').onclick = () => enteredUrl() ? add(enteredUrl(), 'channel', 'Tải cả kênh') : note('Dán URL kênh trước.', true);
+const modeLabels = {'20':'Quét 20 video mới nhất','50':'Quét 50 video mới nhất',all:'Quét toàn kênh',single:'Tải video riêng',channel:'Tải cả kênh'};
+$('scanMode').onchange = () => { $('scanBtn').textContent = modeLabels[$('scanMode').value]; };
 $('scanBtn').onclick = async () => {
-  const url = enteredUrl(); if (!url) return note('Dán URL kênh trước.', true); if (busy) return;
+  const url = enteredUrl(), mode = $('scanMode').value;
+  if (!url) return note('Dán URL trước.', true);
+  if (busy) return;
+  if (mode === 'single') {
+    if (/(?:facebook\.com\/(?:profile\.php|[^/]+\/reels)|tiktok\.com\/@[^/]+\/?$|douyin\.com\/user\/)/i.test(url)) return note('Đây là link kênh. Hãy chọn một chế độ quét.', true);
+    busy = true; $('scanBtn').disabled = true;
+    try { await add(url); } finally { busy = false; $('scanBtn').disabled = false; }
+    return;
+  }
+  if (mode === 'channel') {
+    busy = true; $('scanBtn').disabled = true;
+    try { await add(url, 'channel', 'Tải cả kênh'); } finally { busy = false; $('scanBtn').disabled = false; }
+    return;
+  }
   busy = true; $('scanBtn').disabled = true; $('scanBtn').textContent = 'Đang quét…'; note('Đang lấy danh sách video…');
   try {
-    const data = await api('/scan', 'POST', {url, limit:Number($('limit').value)});
+    const data = await api('/scan', 'POST', {url, limit:mode === 'all' ? 2000 : Number(mode)});
     scanItems = data.items.map(item => ({...item, platform:data.platform})); $('resultsTitle').textContent = data.channel;
     $('resultsMeta').textContent = data.platform + ' · ' + data.items.length + ' video' + (data.limited ? ' (đã đạt giới hạn quét)' : '');
-    renderResults(); note(data.items.length ? 'Chọn video rồi nhấn Tải đã chọn.' : 'Không có video xem trước. Có thể dùng Tải cả kênh.');
+    renderResults(); note(data.items.length ? 'Chọn video rồi nhấn Tải đã chọn. Thông tin nào nguồn không trả sẽ để trống.' : 'Không có video xem trước.');
   } catch (error) { note(error.message, true); }
-  finally { busy = false; $('scanBtn').disabled = false; $('scanBtn').textContent = 'Quét kênh'; }
+  finally { busy = false; $('scanBtn').disabled = false; $('scanBtn').textContent = modeLabels[$('scanMode').value]; }
 };
+function scanMeta(item) {
+  const bits = [item.platform];
+  if (item.upload_date) bits.push(String(item.upload_date).replace(/^(\d{4})(\d{2})(\d{2})$/, '$3/$2/$1'));
+  if (item.duration != null) bits.push(Math.floor(item.duration / 60) + ':' + String(Math.floor(item.duration % 60)).padStart(2, '0'));
+  bits.push(item.view_count != null ? new Intl.NumberFormat('vi-VN').format(item.view_count) + ' lượt xem' : (item.view_label || 'Lượt xem: chưa có dữ liệu'));
+  return bits.filter(Boolean).join(' · ');
+}
 function syncResultSelection() {
   const picks = [...document.querySelectorAll('#results .pick')];
   const selected = picks.filter(x => x.checked).length;
@@ -74,10 +94,9 @@ function syncResultSelection() {
 function renderResults() {
   $('selectResultsWrap').hidden = !scanItems.length;
   $('selectResults').checked = false;
-  $('results').innerHTML = scanItems.length ? scanItems.map((item, i) => `<div class="item result-row"><input type="checkbox" class="pick" data-index="${i}" aria-label="Chọn video số ${i + 1}"><span class="num">${i + 1}</span>${item.thumbnail ? `<img class="thumb" src="${esc(item.thumbnail)}" alt="Ảnh xem trước" loading="lazy" referrerpolicy="no-referrer">` : '<div class="thumb">▶</div>'}<div class="itemmain"><div class="itemtitle" title="${esc(item.title)}">${esc(item.title)}</div><div class="meta">${esc(item.platform || '')} · ${esc(item.url)}</div></div><button class="mini result-menu" type="button" data-more-result="${i}" aria-label="Thao tác video số ${i + 1}" aria-expanded="false">⋮</button><div class="actions"><button class="mini" data-preview="${i}">▶ Xem</button><button class="mini" data-add="${i}">⇩ Tải</button></div></div>`).join('') : '<div class="empty">Không có video nào.</div>';
-  $('results').querySelectorAll('img.thumb').forEach(image => image.onerror = () => { const fallback = document.createElement('div'); fallback.className = 'thumb'; fallback.textContent = '▶'; image.replaceWith(fallback); });
+  $('results').innerHTML = scanItems.length ? scanItems.map((item, i) => `<article class="result-card"><div class="result-poster">${item.thumbnail ? `<img src="${esc(item.thumbnail)}" alt="Ảnh xem trước" loading="lazy" referrerpolicy="no-referrer">` : '<div class="poster-empty">▶</div>'}<span class="result-index">#${i + 1}</span><label class="result-pick" title="Chọn video"><input type="checkbox" class="pick" data-index="${i}" aria-label="Chọn video số ${i + 1}"></label><button class="poster-play" data-preview="${i}" aria-label="Xem video số ${i + 1}">▶</button></div><div class="result-info"><div class="itemtitle" title="${esc(item.title)}">${esc(item.title)}</div><div class="result-metadata">${esc(scanMeta(item))}</div>${item.caption ? `<div class="scan-caption" title="${esc(item.caption)}"><b>Caption:</b> ${esc(item.caption)}</div>` : ''}${item.hashtags?.length ? `<div class="scan-tags" title="${esc(item.hashtags.map(tag => '#' + tag).join(' '))}">${item.hashtags.map(tag => '#' + esc(tag)).join(' ')}</div>` : ''}<div class="result-actions"><button class="mini" data-preview="${i}">▶ Xem</button><button class="mini" data-add="${i}">⇩ Tải</button></div></div></article>`).join('') : '<div class="empty">Không có video nào.</div>';
+  $('results').querySelectorAll('.result-poster img').forEach(image => image.onerror = () => { const fallback = document.createElement('div'); fallback.className = 'poster-empty'; fallback.textContent = '▶'; image.replaceWith(fallback); });
   $('results').querySelectorAll('.pick').forEach(box => box.onchange = syncResultSelection);
-  $('results').querySelectorAll('[data-more-result]').forEach(button => button.onclick = () => { const row = button.closest('.result-row'); const open = row.classList.toggle('open'); button.setAttribute('aria-expanded', String(open)); });
   $('results').querySelectorAll('[data-add]').forEach(button => button.onclick = () => { const item = scanItems[Number(button.dataset.add)]; add(item.url, 'video', item.title); });
   $('results').querySelectorAll('[data-preview]').forEach(button => button.onclick = () => window.TVCViewer.preview(scanItems[Number(button.dataset.preview)]));
   syncResultSelection();

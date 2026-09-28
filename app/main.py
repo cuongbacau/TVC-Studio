@@ -256,8 +256,11 @@ async def facebook_items(url, limit):
         raise HTTPException(502, 'Danh sách Reels không hợp lệ')
     if not items:
         raise HTTPException(422, 'Không thấy Reel nào. Kiểm tra cookie Facebook còn hạn và Trang có Reels công khai.')
-    return [{'url': item['url'], 'title': item.get('title') or 'Reel ' + item['url'].rstrip('/').split('/')[-1],
-             'thumbnail': item.get('thumbnail') or ''} for item in items[:limit]]
+    return [{'url': item['url'], 'title': item.get('title') or (item.get('caption') or '')[:100] or 'Reel ' + item['url'].rstrip('/').split('/')[-1],
+             'caption': item.get('caption') or '', 'hashtags': item.get('hashtags') or [],
+             'view_count': item.get('view_count'), 'view_label': item.get('view_label') or '',
+             'thumbnail': item.get('thumbnail') or ''}
+            for item in items[:limit]]
 
 
 def cookie_file(platform):
@@ -299,7 +302,7 @@ def folder_name(value):
 
 class Scan(BaseModel):
     url: str
-    limit: int = Field(60, ge=1, le=200)
+    limit: int = Field(20, ge=1, le=2000)
 
 
 class Add(BaseModel):
@@ -436,13 +439,16 @@ async def scan(payload: Scan, _: None = Depends(auth)):
         return {'platform': platform, 'channel': 'Facebook Reels',
                 'items': items, 'limited': len(items) >= payload.limit}
     # Never resolve arbitrary domains or run a shell. yt-dlp may follow platform redirects.
-    cmd = ['yt-dlp', '--dump-single-json', '--flat-playlist', '--playlist-end', str(payload.limit), '--no-warnings', '--no-download']
+    # Fetch individual video metadata for small scans; large scans stay flat
+    # so a full channel does not trigger thousands of detail requests.
+    cmd = ['yt-dlp', '--dump-single-json', '--no-flat-playlist' if payload.limit <= 50 else '--flat-playlist',
+           '--ignore-errors', '--playlist-end', str(payload.limit), '--no-warnings', '--no-download']
     if cookies := cookie_file(platform):
         cmd += ['--cookies', str(cookies)]
     cmd.append(payload.url)
     try:
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=90)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=480)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
@@ -454,7 +460,8 @@ async def scan(payload: Scan, _: None = Depends(auth)):
     except ValueError:
         raise HTTPException(502, 'Không đọc được dữ liệu từ yt-dlp')
     items = []
-    for entry in (data.get('entries') or [data])[:payload.limit]:
+    entries = data.get('entries') if isinstance(data.get('entries'), list) else [data]
+    for entry in entries[:payload.limit]:
         if not entry:
             continue
         link = entry.get('webpage_url') or entry.get('url') or ''
@@ -468,7 +475,20 @@ async def scan(payload: Scan, _: None = Depends(auth)):
             continue
         thumbs = entry.get('thumbnails') or []
         thumbnail = entry.get('thumbnail') or next((t.get('url') for t in reversed(thumbs) if isinstance(t, dict) and t.get('url')), '')
-        items.append({'url': link, 'title': entry.get('title') or entry.get('id') or 'Video', 'thumbnail': thumbnail})
+        caption = entry.get('description') or entry.get('fulltitle') or ''
+        if not isinstance(caption, str):
+            caption = ''
+        tags = entry.get('tags') or []
+        if not isinstance(tags, list):
+            tags = []
+        hashtags = list(dict.fromkeys(str(tag).lstrip('#') for tag in tags if isinstance(tag, str) and tag.strip()))[:30]
+        hashtags += [tag for tag in re.findall(r'(?<!\w)#([\w\u00c0-\u024f]+)', caption) if tag not in hashtags][:max(0, 30 - len(hashtags))]
+        views = entry.get('view_count')
+        items.append({'url': link, 'title': entry.get('title') or entry.get('id') or 'Video',
+                      'caption': caption[:4000], 'hashtags': hashtags, 'thumbnail': thumbnail,
+                      'view_count': views if isinstance(views, int) and views >= 0 else None,
+                      'upload_date': entry.get('upload_date') or '',
+                      'duration': entry.get('duration') if isinstance(entry.get('duration'), (int, float)) else None})
     return {'platform': platform, 'channel': data.get('channel') or data.get('uploader') or data.get('title') or platform, 'items': items, 'limited': len(items) >= payload.limit}
 
 

@@ -40,7 +40,10 @@ def visible_reels(browser):
         const img = images[0];
         const background = !img && node ? getComputedStyle(node).backgroundImage : '';
         const match = background && background.match(/url\\(["']?(https:\\/\\/[^"')]+)["']?\\)/);
-        return {href: a.href, thumbnail: img ? (img.currentSrc || img.src) : (match ? match[1] : '')};
+        const card = a.closest('[role="article"]') || a.parentElement?.parentElement || a;
+        const caption = (a.getAttribute('aria-label') || img?.getAttribute('alt') || card.innerText || '').trim().slice(0, 1000);
+        const viewLabel = (card.innerText || '').match(/[\\d.,]+\\s*[KMB]?\\s*(?:views|lượt xem)/i)?.[0] || '';
+        return {href: a.href, thumbnail: img ? (img.currentSrc || img.src) : (match ? match[1] : ''), caption, view_label: viewLabel};
       });
     ''')
 
@@ -73,28 +76,39 @@ def collect(url, cookie_path, limit):
         found = {}
         stagnant = 0
         for _ in range(min(240, max(12, limit // 4 + 12))):
-            before = (len(found), sum(bool(poster) for poster in found.values()))
+            before = (len(found), sum(bool(item['thumbnail']) for item in found.values()))
             for item in visible_reels(browser):
                 match = re.search(r'/(?:reel|reels)/(\d{6,})', item.get('href') or '')
                 if match:
                     link = f'https://www.facebook.com/reel/{match.group(1)}/'
                     thumbnail = item.get('thumbnail') or ''
-                    if thumbnail.startswith('https://') and (not found.get(link) or len(thumbnail) > len(found[link])):
-                        found[link] = thumbnail
-                    else:
-                        found.setdefault(link, '')
-            for link in reel_links(browser.page_source):
-                found.setdefault(link, '')
-            if sum(bool(poster) for poster in found.values()) >= limit:
+                    caption = item.get('caption') or ''
+                    found.setdefault(link, {'thumbnail': '', 'caption': '', 'view_label': ''})
+                    if thumbnail.startswith('https://') and len(thumbnail) > len(found[link]['thumbnail']):
+                        found[link]['thumbnail'] = thumbnail
+                    if len(caption) > len(found[link]['caption']):
+                        found[link]['caption'] = caption
+                    if item.get('view_label'):
+                        found[link]['view_label'] = item['view_label']
+            if len(found) >= limit:
                 break
             browser.execute_script('window.scrollTo(0, document.body.scrollHeight)')
             import time
             time.sleep(1.5)
-            stagnant = stagnant + 1 if (len(found), sum(bool(poster) for poster in found.values())) == before else 0
+            stagnant = stagnant + 1 if (len(found), sum(bool(item['thumbnail']) for item in found.values())) == before else 0
             if stagnant >= 5:
                 break
-        links = sorted(found, key=lambda link: not bool(found[link]))[:limit]
-        return [{'url': link, 'thumbnail': found[link]} for link in links]
+        # Grid order normally follows the page's newest-first order. JSON ids
+        # found in the page source are only a fallback; sorting ids is not a date.
+        if not found:
+            for link in reel_links(browser.page_source):
+                found.setdefault(link, {'thumbnail': '', 'caption': '', 'view_label': ''})
+        links = list(found)[:limit]
+        return [{'url': link, 'thumbnail': found[link]['thumbnail'],
+                 'caption': found[link]['caption'],
+                 'view_label': found[link]['view_label'],
+                 'hashtags': list(dict.fromkeys(re.findall(r'(?<!\w)#([\w]+)', found[link]['caption'])))[:30]}
+                for link in links]
     finally:
         browser.quit()
 
