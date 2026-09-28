@@ -10,6 +10,8 @@ import time
 import uuid
 import mimetypes
 import html
+import hashlib
+import subprocess
 from html.parser import HTMLParser
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
@@ -24,6 +26,7 @@ from pydantic import BaseModel, Field
 
 ROOT = Path(os.getenv('TVC_DATA', './data')).resolve()
 DOWNLOADS = ROOT / 'downloads'
+THUMBNAILS = ROOT / 'thumbs'
 DB = ROOT / 'queue.sqlite3'
 ROOT.mkdir(parents=True, exist_ok=True)
 DOWNLOADS.mkdir(exist_ok=True)
@@ -88,7 +91,8 @@ def media_entry(path):
     return {'name': name, 'title': path.name,
             'kind': 'video' if path.suffix.lower() in VIDEO_EXT else 'image',
             'size': stat.st_size, 'modified': stat.st_mtime,
-            'url': '/api/media/file/' + quote(name, safe='/')}
+            'url': '/api/media/file/' + quote(name, safe='/'),
+            'thumbnail': ('/api/media/thumb/' if path.suffix.lower() in VIDEO_EXT else '/api/media/file/') + quote(name, safe='/')}
 
 
 def folder_media(job):
@@ -339,6 +343,34 @@ def media_file(name: str, download: bool = False, _: None = Depends(auth)):
     return FileResponse(path, filename=path.name if download else None,
                         content_disposition_type='attachment' if download else 'inline',
                         media_type=mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
+
+
+@app.get('/api/media/thumb/{name:path}')
+def media_thumbnail(name: str, _: None = Depends(auth)):
+    source = (DOWNLOADS / name).resolve()
+    if not source.is_relative_to(DOWNLOADS) or not source.is_file() or source.suffix.lower() not in VIDEO_EXT:
+        raise HTTPException(404, 'Không tìm thấy video')
+    stat = source.stat()
+    key = hashlib.sha256(f'{name}:{stat.st_size}:{stat.st_mtime_ns}'.encode()).hexdigest()
+    THUMBNAILS.mkdir(exist_ok=True)
+    image = THUMBNAILS / (key + '.jpg')
+    if not image.is_file():
+        temp = THUMBNAILS / (key + '-' + uuid.uuid4().hex + '.jpg')
+        try:
+            for offset in ('1', '0'):
+                result = subprocess.run(['ffmpeg', '-v', 'error', '-ss', offset, '-i', str(source),
+                                         '-frames:v', '1', '-vf', 'scale=240:-2', '-q:v', '6', '-y', str(temp)],
+                                        capture_output=True, timeout=15)
+                if result.returncode == 0 and temp.is_file() and temp.stat().st_size:
+                    os.replace(temp, image)
+                    break
+            if not image.is_file():
+                raise HTTPException(404, 'Video chưa có ảnh xem trước')
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, 'Tạo ảnh xem trước quá thời gian')
+        finally:
+            temp.unlink(missing_ok=True)
+    return FileResponse(image, media_type='image/jpeg')
 
 
 class Preview(BaseModel):

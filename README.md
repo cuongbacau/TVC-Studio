@@ -10,6 +10,8 @@ Bản 0.5.4: giao diện co giãn cho PC/điện thoại; kết quả quét có 
 
 Bản 0.5.5: khi dán link Facebook `/share/r/…` hoặc `/share/v/…`, bấm **Giải mã link Facebook** để xem link gốc; nút **+ Thêm URL tải** tự giải mã trước khi xếp hàng. Tác vụ cũ mang link chia sẻ cũng tự giải mã lúc chạy. Nếu yt-dlp báo lỗi với Reel đã giải mã và có cookie Facebook, ứng dụng thử lại một lần bằng chế độ giả lập Chrome. Bản này cài thêm phần hỗ trợ `curl-cffi` cho yt-dlp. Facebook có thể vẫn hạn chế Reel cụ thể, kể cả khi link gốc và cookie hợp lệ; lỗi cuối cùng hiện trong Hàng đợi.
 
+Bản 0.5.6: giao diện điện thoại theo bố cục TVC Studio AI gửi kèm: thanh đầu trang gọn, ô quét kênh, thẻ Hoạt động, kết quả quét và Hàng đợi dạng thẻ nhỏ. Menu ☰ mở điều hướng, menu ⋮ ở kết quả mở nút Xem/Tải, và ⋮ ở Hàng đợi mở chi tiết. Mỗi file hoàn tất hiển thị thành một thẻ riêng trong Hàng đợi, có nút Xem/Tải và ảnh thu nhỏ tạo từ video bằng FFmpeg khi trình duyệt yêu cầu. File gốc, hàng đợi và cookie vẫn ở `data/`; ảnh thu nhỏ được lưu trong `data/thumbs/`.
+
 ## Cài trên Ubuntu
 
 Cần Docker Engine và Docker Compose plugin. Giải nén, vào thư mục `tvc-downloader`, rồi:
