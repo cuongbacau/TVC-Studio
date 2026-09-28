@@ -21,11 +21,11 @@ if [[ "$after" == "$before" ]]; then
   echo 'Mã nguồn đã ở phiên bản mới nhất.'
   exit 0
 fi
-if docker compose up -d --build; then
+if sudo docker compose up -d --build; then
   printf 'Đã cập nhật %s → %s. data/ và .env giữ nguyên.\n' "${before:0:8}" "${after:0:8}"
 else
   echo 'Không khởi động được bản mới; khôi phục mã nguồn trước cập nhật.' >&2
   git reset --hard "$before"
-  docker compose up -d --build || echo 'Không tự khởi động được bản cũ; kiểm tra docker compose logs.' >&2
+  sudo docker compose up -d --build || echo 'Không tự khởi động được bản cũ; kiểm tra docker compose logs.' >&2
   exit 1
 fi

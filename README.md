@@ -36,7 +36,7 @@ Trên Ubuntu, cài từ repo bằng `git clone GIT_URL_CUA_BAN`, `cd tvc-downloa
 ./update-git.sh
 ```
 
-Script dùng `git pull --ff-only`, build lại container và giữ nguyên `data/`, `.env`. Nếu build lỗi, nó trả mã nguồn về commit trước. Nó từ chối cập nhật khi mã nguồn trên Ubuntu đã sửa để không ghi đè thay đổi của bồ. Không chạy `git add -f data/` hay đưa `.env` lên GitHub.
+Script dùng `git pull --ff-only`, gọi `sudo docker compose` để build lại container và giữ nguyên `data/`, `.env`. Nếu build lỗi, nó trả mã nguồn về commit trước. Nó từ chối cập nhật khi mã nguồn trên Ubuntu đã sửa để không ghi đè thay đổi của bồ. Không chạy `git add -f data/` hay đưa `.env` lên GitHub.
 
 ## Cập nhật bằng ZIP mà không mất video
 
