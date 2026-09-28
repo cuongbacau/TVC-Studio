@@ -64,6 +64,12 @@ Kiểm tra: `sudo docker compose logs -f --tail=80`. Cập nhật yt-dlp/F2: `su
 - Các trang thay đổi thường xuyên; lỗi quét/tải do xác thực hay hạn chế nền tảng hiện ở hàng đợi. Không có bảo đảm quét hết video nếu nền tảng giới hạn phân trang.
 - Chỉ tải nội dung bạn có quyền lưu và sử dụng.
 
+## Xem và tải về PC/điện thoại
+
+Ở danh sách quét kênh, bấm **Xem** để xem thử video hoặc ảnh khi nền tảng cung cấp đường dẫn phát trực tiếp. Nếu bị chặn, tải về Ubuntu rồi xem trong **Thư viện**. Video xem trước ưu tiên MP4 khoảng 720p; nguồn có thể hết hạn hoặc không cho phát từ trình duyệt.
+
+Trong **Thư viện**, bấm **Xem** để phát video/ảnh đã lưu trên Ubuntu, hoặc **Tải về** để sao chép file về PC/điện thoại. Nơi lưu bản sao do trình duyệt và cài đặt của thiết bị quyết định (trên iPhone thường là ứng dụng Tệp/Downloads). File gốc vẫn nằm ở `data/downloads/` trên Ubuntu. MP4/MOV/JPG/PNG/WEBP thường xem được; MKV hoặc codec lạ có thể cần tải về rồi mở bằng ứng dụng phù hợp.
+
 ## Khi TikTok báo cần đăng nhập
 
 Trên PC đã đăng nhập TikTok bằng Chrome, có thể cài yt-dlp và chạy `yt-dlp --cookies-from-browser chrome --cookies tiktok.txt` để xuất cookie theo định dạng Netscape. Nếu dùng Edge, thay `chrome` bằng `edge`. Chuyển file sang Ubuntu (thay IP nếu máy thay đổi):

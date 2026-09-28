@@ -8,7 +8,7 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import FileResponse
@@ -27,6 +27,8 @@ security = HTTPBasic()
 active = {}
 worker_task = None
 paused = False
+VIDEO_EXT = {'.mp4', '.webm', '.mov', '.m4v', '.mkv'}
+IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'}
 
 
 def auth(credentials: HTTPBasicCredentials = Depends(security)):
@@ -146,6 +148,70 @@ def home(_: None = Depends(auth)):
 @app.get('/api/version')
 def version(_: None = Depends(auth)):
     return {'version': VERSION}
+
+
+@app.get('/api/media')
+def media(_: None = Depends(auth)):
+    files = []
+    for path in DOWNLOADS.rglob('*'):
+        if not path.is_file() or path.is_symlink() or path.suffix.lower() not in VIDEO_EXT | IMAGE_EXT:
+            continue
+        try:
+            stat = path.stat()
+            name = path.relative_to(DOWNLOADS).as_posix()
+            files.append({'name': name, 'title': path.name, 'kind': 'video' if path.suffix.lower() in VIDEO_EXT else 'image',
+                          'size': stat.st_size, 'modified': stat.st_mtime,
+                          'url': '/api/media/file/' + quote(name, safe='/')})
+        except OSError:
+            continue
+    files.sort(key=lambda item: item['modified'], reverse=True)
+    return {'files': files[:500], 'total': len(files)}
+
+
+@app.get('/api/media/file/{name:path}')
+def media_file(name: str, download: bool = False, _: None = Depends(auth)):
+    path = (DOWNLOADS / name).resolve()
+    if not path.is_relative_to(DOWNLOADS) or not path.is_file() or path.suffix.lower() not in VIDEO_EXT | IMAGE_EXT:
+        raise HTTPException(404, 'Không tìm thấy file')
+    # The source file stays on Ubuntu. Browser download is a copy.
+    return FileResponse(path, filename=path.name if download else None,
+                        content_disposition_type='attachment' if download else 'inline')
+
+
+class Preview(BaseModel):
+    url: str
+
+
+@app.post('/api/preview')
+async def preview(payload: Preview, _: None = Depends(auth)):
+    platform = platform_of(payload.url)
+    cmd = ['yt-dlp', '--dump-single-json', '--no-playlist', '--no-warnings', '--skip-download']
+    if cookies := cookie_file(platform):
+        cmd += ['--cookies', str(cookies)]
+    cmd.append(payload.url)
+    try:
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=60)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise HTTPException(504, 'Xem trước quá thời gian')
+    if proc.returncode:
+        raise HTTPException(422, (err.decode(errors='replace')[-400:] or 'Không xem trước được'))
+    try:
+        info = json.loads(out)
+    except ValueError:
+        raise HTTPException(502, 'Dữ liệu xem trước không hợp lệ')
+    formats = [f for f in (info.get('formats') or []) if str(f.get('url') or '').startswith('https://') and
+               f.get('ext') == 'mp4' and f.get('vcodec') != 'none' and f.get('acodec') != 'none' and
+               f.get('protocol') in (None, 'https')]
+    formats.sort(key=lambda f: ((f.get('height') or 0) > 720, abs((f.get('height') or 720) - 720), -(f.get('height') or 0)))
+    source = formats[0]['url'] if formats else (info.get('url') if str(info.get('url') or '').startswith('https://') and info.get('ext') == 'mp4' else '')
+    photos = [e.get('url') for e in (info.get('entries') or []) if isinstance(e, dict) and str(e.get('url') or '').startswith('https://') and ('.' + str(e.get('ext', '')).lower()) in IMAGE_EXT]
+    thumbnail = info.get('thumbnail') or ''
+    return {'title': info.get('title') or 'Xem trước', 'kind': 'video' if source else 'image',
+            'url': source or (photos[0] if photos else thumbnail), 'images': photos,
+            'thumbnail': thumbnail, 'available': bool(source or photos or thumbnail)}
 
 
 @app.get('/api/jobs')
