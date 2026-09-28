@@ -5,10 +5,11 @@ import re
 import secrets
 import signal
 import sqlite3
+import sys
 import time
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse, quote, parse_qs
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import FileResponse
@@ -98,6 +99,46 @@ def clean_url(value):
     url = match.group(0).rstrip('.,;:!?)]}，。！？；、）》】')
     platform_of(url)
     return url
+
+
+def facebook_reels_url(url):
+    parsed = urlparse(url)
+    if platform_of(url) != 'Facebook':
+        raise HTTPException(422, 'Cần link Trang Facebook')
+    parts = [p for p in parsed.path.split('/') if p]
+    if parts == ['profile.php']:
+        profile_id = parse_qs(parsed.query).get('id', [''])[0]
+        if not re.fullmatch(r'\d{10,20}', profile_id):
+            raise HTTPException(422, 'Link Trang thiếu ID Facebook')
+        return f'https://www.facebook.com/profile.php?id={profile_id}&sk=reels_tab'
+    if len(parts) in (1, 2) and parts[0].lower() not in ('share', 'reel', 'watch', 'videos', 'groups'):
+        if len(parts) == 1 or parts[1].lower() in ('reels', 'videos'):
+            return f'https://www.facebook.com/{parts[0]}/reels/'
+    raise HTTPException(422, 'Đây là link video. Để quét Reels, dán link Trang Facebook (mục Reels).')
+
+
+async def facebook_items(url, limit):
+    cookies = cookie_file('Facebook')
+    if not cookies:
+        raise HTTPException(422, 'Quét toàn bộ Reels cần cookie Facebook tại data/cookies/facebook.txt trên Ubuntu.')
+    cmd = [sys.executable, '-m', 'app.facebook_reels', facebook_reels_url(url), str(cookies), str(limit)]
+    proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE,
+                                                 stderr=asyncio.subprocess.PIPE)
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=480)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise HTTPException(504, 'Quét Reels quá thời gian; thử lại hoặc giảm số video.')
+    if proc.returncode:
+        raise HTTPException(422, err.decode(errors='replace')[-450:] or 'Không đọc được Reels Facebook')
+    try:
+        urls = json.loads(out)['urls']
+    except (ValueError, KeyError):
+        raise HTTPException(502, 'Danh sách Reels không hợp lệ')
+    if not urls:
+        raise HTTPException(422, 'Không thấy Reel nào. Kiểm tra cookie Facebook còn hạn và Trang có Reels công khai.')
+    return urls
 
 
 def cookie_file(platform):
@@ -234,6 +275,12 @@ def jobs(_: None = Depends(auth)):
 async def scan(payload: Scan, _: None = Depends(auth)):
     payload.url = clean_url(payload.url)
     platform = platform_of(payload.url)
+    if platform == 'Facebook':
+        url = facebook_reels_url(payload.url)
+        urls = await facebook_items(url, payload.limit)
+        return {'platform': platform, 'channel': 'Facebook Reels',
+                'items': [{'url': link, 'title': 'Reel ' + link.rstrip('/').split('/')[-1], 'thumbnail': ''} for link in urls],
+                'limited': len(urls) >= payload.limit}
     # Never resolve arbitrary domains or run a shell. yt-dlp may follow platform redirects.
     cmd = ['yt-dlp', '--dump-single-json', '--flat-playlist', '--playlist-end', str(payload.limit), '--no-warnings', '--no-download']
     if cookies := cookie_file(platform):
@@ -275,8 +322,11 @@ def add(payload: Add, _: None = Depends(auth)):
     platform = platform_of(payload.url)
     if payload.mode not in ('video', 'channel'):
         raise HTTPException(422, 'Chế độ không hợp lệ')
-    engine = ('f2' if platform == 'Douyin' or (platform == 'TikTok' and payload.mode == 'channel') else 'yt-dlp') if payload.engine == 'auto' else payload.engine
-    if engine not in ('f2', 'yt-dlp') or (engine == 'f2' and platform not in ('Douyin', 'TikTok')):
+    if platform == 'Facebook' and payload.mode == 'channel':
+        payload.url = facebook_reels_url(payload.url)
+    engine = ('facebook-reels' if platform == 'Facebook' and payload.mode == 'channel' else
+              'f2' if platform == 'Douyin' or (platform == 'TikTok' and payload.mode == 'channel') else 'yt-dlp') if payload.engine == 'auto' else payload.engine
+    if engine not in ('f2', 'yt-dlp', 'facebook-reels') or (engine == 'f2' and platform not in ('Douyin', 'TikTok')) or (engine == 'facebook-reels' and (platform != 'Facebook' or payload.mode != 'channel')):
         raise HTTPException(422, 'Bộ tải không hỗ trợ nền tảng này')
     folder = folder_name(payload.folder or platform)
     title = (payload.title or payload.url)[:180]
@@ -350,7 +400,20 @@ async def run_job(job):
     update(jid, status='running', attempts=job['attempts'] + 1, message='Đang tải')
     log = []
     try:
-        proc = await asyncio.create_subprocess_exec(*command_for(job), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
+        cmd = command_for(job)
+        if job['engine'] == 'facebook-reels':
+            update(jid, message='Đang quét Reels Facebook (có thể mất vài phút)')
+            urls = await facebook_items(job['url'], 2000)
+            if paused:
+                update(jid, status='queued', message='Hàng đợi tạm dừng; sẽ quét lại')
+                return
+            if get_job(jid)['status'] != 'running':
+                return
+            list_path = ROOT / ('facebook-reels-' + jid + '.txt')
+            list_path.write_text('\n'.join(urls) + '\n', encoding='utf-8')
+            cmd = cmd[:-1] + ['-a', str(list_path)]
+            update(jid, message=f'Đã tìm {len(urls)} Reels; đang tải')
+        proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
         active[jid] = proc
         while line := await proc.stdout.readline():
             s = line.decode(errors='replace').strip()
@@ -372,7 +435,7 @@ async def run_job(job):
             update(jid, status='failed', message=msg)
     except Exception as exc:
         if get_job(jid)['status'] == 'running':
-            update(jid, status='failed', message=str(exc)[:500])
+            update(jid, status='failed', message=str(exc.detail if isinstance(exc, HTTPException) else exc)[:500])
     finally:
         active.pop(jid, None)
 

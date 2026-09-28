@@ -4,6 +4,8 @@ Giao diện web tiếng Việt cho điện thoại và PC, chạy tải video tr
 
 Bản 0.5.2: các ô Hoạt động mở hàng đợi theo trạng thái; ô URL có mẫu link kênh và tự tách URL từ đoạn chia sẻ Douyin; video lẻ Douyin tải bằng F2. Nếu một tác vụ cũ đã báo lỗi, thêm lại link video để tạo tác vụ mới. Nếu F2 vẫn báo lỗi xác thực, xem thông báo ở **Cần kiểm tra** và thiết lập cookie Douyin trên Ubuntu.
 
+Bản 0.5.3: quét tab Reels Facebook theo link dạng `https://www.facebook.com/profile.php?id=61589782348979&sk=reels_tab` hoặc `https://www.facebook.com/TenTrang/reels/`. Trình quét Chrome chạy ẩn trong container, đọc cookie Netscape từ `data/cookies/facebook.txt`, cuộn trang và đưa các link Reel tìm thấy vào bộ tải yt-dlp. Với Reels Facebook, cần cookie còn hạn để thấy các trang tiếp theo. Không gửi cookie vào chat/GitHub; chỉ chép vào Ubuntu. Việc cuộn có thể mất vài phút, tối đa 2.000 Reel cho một lượt **Tải cả kênh**; nếu Trang giới hạn nội dung, danh sách có thể không đầy đủ. Chrome làm bản Docker đầu tiên của phiên bản này lớn hơn.
+
 ## Cài trên Ubuntu
 
 Cần Docker Engine và Docker Compose plugin. Giải nén, vào thư mục `tvc-downloader`, rồi:
@@ -52,7 +54,7 @@ Script kiểm tra gói, sao lưu mã nguồn cũ trong `.updates/`, thay mã, ch
 
 ## Dùng
 
-1. Bấm mẫu link Douyin/TikTok/Facebook để điền đầu link kênh, thêm tên/ID, rồi bấm **Quét kênh** để xem tối đa 30–200 video. Hoặc bấm **Tải cả kênh**. Có thể dán nguyên đoạn chia sẻ Douyin: ứng dụng tự tách link. Quét Douyin vẫn phụ thuộc khả năng yt-dlp và cookie; nếu không quét được, dùng **Tải cả kênh** với F2.
+1. Bấm mẫu link Douyin/TikTok/Facebook để điền đầu link kênh, thêm tên/ID, rồi bấm **Quét kênh** để xem tối đa 30–200 video. Hoặc bấm **Tải cả kênh**. Với Facebook, dùng URL tab Reels của Trang; link `/share/r/…` là một video và chỉ dùng **+ Thêm URL tải**. Có thể dán nguyên đoạn chia sẻ Douyin: ứng dụng tự tách link. Quét Douyin vẫn phụ thuộc khả năng yt-dlp và cookie; nếu không quét được, dùng **Tải cả kênh** với F2.
 2. Với URL video riêng, bấm **+ Thêm URL tải**.
 3. Đặt **Thư mục lưu** trước khi thêm tác vụ. File ở `data/downloads/<Nền tảng>/<Thư mục>` trên Ubuntu. Mỗi kênh nên đặt tên thư mục riêng.
 4. Hàng đợi vẫn chạy khi đóng trang; khởi động lại container thì tác vụ đang chạy được xếp lại. Các tác vụ hoàn tất lưu dấu qua `data/archive.txt` đối với yt-dlp. F2 quản lý file trùng theo cơ chế riêng của F2.
@@ -64,6 +66,7 @@ Kiểm tra: `sudo docker compose logs -f --tail=80`. Cập nhật yt-dlp/F2: `su
 ## Lưu ý
 
 - Một số kênh Douyin/TikTok yêu cầu cookie đăng nhập. Nếu TikTok/Douyin yêu cầu xác thực, đặt cookie dạng Netscape tại `data/cookies/tiktok.txt` hoặc `data/cookies/douyin.txt`. Ứng dụng tự đưa file đó vào yt-dlp khi quét/tải, và chuyển cookie tương ứng cho F2 khi tải kênh. Cookie là phiên đăng nhập: không gửi trong chat, không đưa lên GitHub, chỉ dùng trên máy chủ tin cậy. Xuất cookie bằng yt-dlp trên PC đã đăng nhập (xem phần dưới).
+- Để quét toàn bộ Reels Facebook, xuất cookie Netscape từ trình duyệt PC đã đăng nhập Facebook rồi chép thành `~/TVC-Studio/data/cookies/facebook.txt`. Có thể dùng `yt-dlp --cookies-from-browser chrome --cookies facebook.txt` trên PC, sau đó dùng `scp` chuyển file vào Ubuntu; `chmod 600` file ở Ubuntu. Không cần đưa mật khẩu Facebook vào TVC. Cookie hết hạn thì xuất lại. Link Trang riêng tư chỉ hiển thị nội dung mà tài khoản cookie được phép xem.
 - Các trang thay đổi thường xuyên; lỗi quét/tải do xác thực hay hạn chế nền tảng hiện ở hàng đợi. Không có bảo đảm quét hết video nếu nền tảng giới hạn phân trang.
 - Chỉ tải nội dung bạn có quyền lưu và sử dụng.
 
