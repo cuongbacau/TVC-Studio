@@ -14,6 +14,8 @@ Bản 0.5.6: giao diện điện thoại theo bố cục TVC Studio AI gửi kè
 
 Bản 0.5.7: giao diện quét có một ô Chế độ: 20 hoặc 50 video mới nhất, quét toàn kênh (tối đa 2.000), tải một video riêng hoặc tải cả kênh trực tiếp. Bỏ hai nút thêm URL/tải cả kênh cũ để không trùng thao tác. Kết quả quét là lưới ảnh dọc theo mẫu, có ô chọn, Xem, Tải, số thứ tự, caption, hashtag, lượt xem, ngày đăng và thời lượng khi nền tảng trả dữ liệu. Quét 20/50 cố lấy chi tiết từng video nên có thể mất vài phút; quét toàn kênh dùng danh sách gọn nên metadata có thể thiếu. Facebook chỉ có lượt xem nếu lưới Reels hiển thị. Thứ tự lấy theo danh sách nguồn trả về; một số nguồn không bảo đảm sắp theo ngày mới nhất.
 
+Bản 0.5.8: Facebook không còn dùng nhãn ảnh “Bản xem trước ô thước phim” làm caption. Với lựa chọn quét 20/50 Reels, sau khi lấy lưới ảnh ứng dụng hỏi metadata riêng cho từng Reel (tối đa 4 yêu cầu đồng thời) bằng cookie Facebook trên máy chủ; cố lấy caption, hashtag, lượt xem, thời lượng và ngày đăng. Nếu nguồn chỉ trả tiêu đề có lượt xem, ứng dụng tách số lượt xem và caption từ tiêu đề. Thông tin không được Facebook cung cấp sẽ ẩn, không ghi một con số giả. Quét này có thể chờ lâu hơn; quét toàn kênh không gọi metadata từng video.
+
 ## Cài trên Ubuntu
 
 Cần Docker Engine và Docker Compose plugin. Giải nén, vào thư mục `tvc-downloader`, rồi:

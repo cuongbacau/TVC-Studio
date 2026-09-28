@@ -80,7 +80,8 @@ function scanMeta(item) {
   const bits = [item.platform];
   if (item.upload_date) bits.push(String(item.upload_date).replace(/^(\d{4})(\d{2})(\d{2})$/, '$3/$2/$1'));
   if (item.duration != null) bits.push(Math.floor(item.duration / 60) + ':' + String(Math.floor(item.duration % 60)).padStart(2, '0'));
-  bits.push(item.view_count != null ? new Intl.NumberFormat('vi-VN').format(item.view_count) + ' lượt xem' : (item.view_label || 'Lượt xem: chưa có dữ liệu'));
+  if (item.view_count != null) bits.push(new Intl.NumberFormat('vi-VN').format(item.view_count) + ' lượt xem');
+  else if (item.view_label) bits.push(item.view_label);
   return bits.filter(Boolean).join(' · ');
 }
 function syncResultSelection() {

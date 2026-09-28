@@ -234,7 +234,73 @@ def facebook_reels_url(url):
     raise HTTPException(422, 'Đây là link video. Để quét Reels, dán link Trang Facebook (mục Reels).')
 
 
-async def facebook_items(url, limit):
+def clean_caption(value):
+    if not isinstance(value, str):
+        return ''
+    value = value.strip()
+    if re.fullmatch(r'(?:bản xem trước ô thước phim|bản xem trước thước phim|reel preview|video preview|video thumbnail|ảnh xem trước|reels?|facebook video(?:\s*#?\d+)?)\.?', value, re.I):
+        return ''
+    if re.fullmatch(r'[\d.,]+\s*[KMB]?\s*(?:views|lượt xem)', value, re.I):
+        return ''
+    return value[:4000]
+
+
+def facebook_title_info(value):
+    raw = clean_caption(value)
+    if not raw:
+        return '', ''
+    views = re.search(r'\d[\d.,]*\s*[KMB]?\s*(?:views|lượt xem)', raw, re.I)
+    view_label = views.group(0) if views else ''
+    parts = [part.strip() for part in re.split(r'\s*[｜|]\s*', raw) if part.strip()]
+    if len(parts) >= 2 and re.search(r'(?:views|lượt xem|reactions|cảm xúc)', parts[0], re.I):
+        return clean_caption(parts[1]), view_label
+    return raw, view_label
+
+
+async def facebook_detail(item, cookies, semaphore):
+    async with semaphore:
+        cmd = ['yt-dlp', '--dump-single-json', '--no-playlist', '--ignore-no-formats-error',
+               '--no-warnings', '--socket-timeout', '8', '--retries', '0', '--extractor-retries', '0',
+               '--cookies', str(cookies), item['url']]
+        try:
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE,
+                                                         stderr=asyncio.subprocess.DEVNULL)
+            try:
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=18)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return item
+            if proc.returncode:
+                return item
+            data = json.loads(out)
+        except (OSError, ValueError):
+            return item
+        if not isinstance(data, dict):
+            return item
+        caption, description_views = facebook_title_info(data.get('description'))
+        title, view_label = facebook_title_info(data.get('title'))
+        if not caption:
+            caption = title
+        if title:
+            item['title'] = title[:150]
+        if caption:
+            item['caption'] = caption
+        if (view_label or description_views) and not item.get('view_label'):
+            item['view_label'] = view_label or description_views
+        if isinstance(data.get('view_count'), int) and data['view_count'] >= 0:
+            item['view_count'] = data['view_count']
+        for key in ('upload_date', 'duration'):
+            if data.get(key) is not None:
+                item[key] = data[key]
+        tags = data.get('tags') if isinstance(data.get('tags'), list) else []
+        hashtags = [str(tag).lstrip('#') for tag in tags if isinstance(tag, str) and tag.strip()]
+        hashtags += re.findall(r'(?<!\w)#([\w\u00c0-\u024f]+)', item['caption'] or item['title'])
+        item['hashtags'] = list(dict.fromkeys(hashtags))[:30]
+        return item
+
+
+async def facebook_items(url, limit, enrich=False):
     cookies = cookie_file('Facebook')
     if not cookies:
         raise HTTPException(422, 'Quét toàn bộ Reels cần cookie Facebook tại data/cookies/facebook.txt trên Ubuntu.')
@@ -256,11 +322,18 @@ async def facebook_items(url, limit):
         raise HTTPException(502, 'Danh sách Reels không hợp lệ')
     if not items:
         raise HTTPException(422, 'Không thấy Reel nào. Kiểm tra cookie Facebook còn hạn và Trang có Reels công khai.')
-    return [{'url': item['url'], 'title': item.get('title') or (item.get('caption') or '')[:100] or 'Reel ' + item['url'].rstrip('/').split('/')[-1],
-             'caption': item.get('caption') or '', 'hashtags': item.get('hashtags') or [],
-             'view_count': item.get('view_count'), 'view_label': item.get('view_label') or '',
-             'thumbnail': item.get('thumbnail') or ''}
-            for item in items[:limit]]
+    normalized = []
+    for item in items[:limit]:
+        caption = clean_caption(item.get('caption'))
+        title = clean_caption(item.get('title')) or caption[:100] or 'Reel ' + item['url'].rstrip('/').split('/')[-1]
+        normalized.append({'url': item['url'], 'title': title,
+                           'caption': caption, 'hashtags': list(dict.fromkeys(re.findall(r'(?<!\w)#([\w\u00c0-\u024f]+)', caption or title)))[:30],
+                           'view_count': item.get('view_count'), 'view_label': item.get('view_label') or '',
+                           'thumbnail': item.get('thumbnail') or ''})
+    if enrich and limit <= 50:
+        semaphore = asyncio.Semaphore(4)
+        normalized = await asyncio.gather(*(facebook_detail(item, cookies, semaphore) for item in normalized))
+    return normalized
 
 
 def cookie_file(platform):
@@ -435,7 +508,7 @@ async def scan(payload: Scan, _: None = Depends(auth)):
     platform = platform_of(payload.url)
     if platform == 'Facebook':
         url = facebook_reels_url(payload.url)
-        items = await facebook_items(url, payload.limit)
+        items = await facebook_items(url, payload.limit, enrich=True)
         return {'platform': platform, 'channel': 'Facebook Reels',
                 'items': items, 'limited': len(items) >= payload.limit}
     # Never resolve arbitrary domains or run a shell. yt-dlp may follow platform redirects.
@@ -482,7 +555,7 @@ async def scan(payload: Scan, _: None = Depends(auth)):
         if not isinstance(tags, list):
             tags = []
         hashtags = list(dict.fromkeys(str(tag).lstrip('#') for tag in tags if isinstance(tag, str) and tag.strip()))[:30]
-        hashtags += [tag for tag in re.findall(r'(?<!\w)#([\w\u00c0-\u024f]+)', caption) if tag not in hashtags][:max(0, 30 - len(hashtags))]
+        hashtags += [tag for tag in re.findall(r'(?<!\w)#([\w\u00c0-\u024f]+)', caption or str(entry.get('title') or '')) if tag not in hashtags][:max(0, 30 - len(hashtags))]
         views = entry.get('view_count')
         items.append({'url': link, 'title': entry.get('title') or entry.get('id') or 'Video',
                       'caption': caption[:4000], 'hashtags': hashtags, 'thumbnail': thumbnail,

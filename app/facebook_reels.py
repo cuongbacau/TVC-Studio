@@ -41,7 +41,7 @@ def visible_reels(browser):
         const background = !img && node ? getComputedStyle(node).backgroundImage : '';
         const match = background && background.match(/url\\(["']?(https:\\/\\/[^"')]+)["']?\\)/);
         const card = a.closest('[role="article"]') || a.parentElement?.parentElement || a;
-        const caption = (a.getAttribute('aria-label') || img?.getAttribute('alt') || card.innerText || '').trim().slice(0, 1000);
+        const caption = (card.innerText || '').trim().slice(0, 1000);
         const viewLabel = (card.innerText || '').match(/[\\d.,]+\\s*[KMB]?\\s*(?:views|lượt xem)/i)?.[0] || '';
         return {href: a.href, thumbnail: img ? (img.currentSrc || img.src) : (match ? match[1] : ''), caption, view_label: viewLabel};
       });
