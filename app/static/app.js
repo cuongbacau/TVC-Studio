@@ -9,7 +9,7 @@ $('menuToggle').onclick = () => { const open = $('menuToggle').getAttribute('ari
 document.querySelectorAll('.nav a').forEach(link => link.onclick = () => { document.querySelector('.side').classList.remove('menu-open'); $('menuToggle').setAttribute('aria-expanded','false'); });
 function note(message, error = false) { $('notice').textContent = message; $('notice').style.color = error ? '#ffacb6' : '#cdb8ff'; }
 async function api(path, method = 'GET', body) {
-  const response = await fetch('/api' + path, {method, headers: body ? {'Content-Type':'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
+  const response = await fetch('api' + path, {method, headers: body ? {'Content-Type':'application/json'} : {}, body: body ? JSON.stringify(body) : undefined});
   const value = await response.json().catch(() => ({}));
   if (!response.ok) throw Error(typeof value.detail === 'string' ? value.detail : 'Lỗi ' + response.status);
   return value;

@@ -99,8 +99,8 @@ def media_entry(path):
     return {'name': name, 'title': path.name,
             'kind': 'video' if path.suffix.lower() in VIDEO_EXT else 'image',
             'size': stat.st_size, 'modified': stat.st_mtime,
-            'url': '/api/media/file/' + quote(name, safe='/'),
-            'thumbnail': ('/api/media/thumb/' if path.suffix.lower() in VIDEO_EXT else '/api/media/file/') + quote(name, safe='/')}
+            'url': 'api/media/file/' + quote(name, safe='/'),
+            'thumbnail': ('api/media/thumb/' if path.suffix.lower() in VIDEO_EXT else 'api/media/file/') + quote(name, safe='/')}
 
 
 def folder_media(job):

@@ -38,7 +38,7 @@
   async function preview(item) {
     byId('viewerHint').textContent = 'Đang lấy video/ảnh xem trước…';
     try {
-      const response = await fetch('/api/preview', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url:item.url})});
+      const response = await fetch('api/preview', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url:item.url})});
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw Error(data.detail || 'Lỗi ' + response.status);
       if (!data.available) throw Error('Nguồn này chưa có ảnh hoặc video xem trước.');

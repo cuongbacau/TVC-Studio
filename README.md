@@ -1,5 +1,21 @@
 # TVC Downloader
 
+## Dùng chung tên miền DuckDNS với Nextcloud
+
+Bản 0.6.4 dùng đường dẫn tương đối cho giao diện, API và file tải, nên có thể mở tại `https://cuongbx.duckdns.org/downloader/`. Giữ dấu `/` cuối URL; proxy phải bỏ tiền tố `/downloader` trước khi chuyển yêu cầu vào ứng dụng. Nextcloud vẫn xử lý các đường dẫn còn lại.
+
+Ví dụ thêm vào khối site `cuongbx.duckdns.org` **đang có** trong Caddyfile (không tạo khối site trùng tên):
+
+```caddyfile
+redir /downloader /downloader/ 308
+handle_path /downloader/* {
+    reverse_proxy 192.168.1.13:8080
+}
+# Giữ nguyên các chỉ thị xử lý Nextcloud hiện tại trong khối site này.
+```
+
+Giữ nguyên đích reverse proxy Nextcloud hiện tại, đặt `handle_path` trước khối xử lý mặc định của Nextcloud. Nếu Caddy chạy trong Docker, `127.0.0.1` là chính container Caddy, **không** phải máy Ubuntu. Caddy cần truy cập được địa chỉ LAN `192.168.1.13:8080` của trình tải như cấu hình máy đang dùng; nếu chỉ bind `127.0.0.1:8080`, cần cho Caddy và trình tải vào cùng Docker network rồi proxy theo tên service, hoặc mở cổng trên IP LAN có firewall và Basic Auth. Sau khi kiểm tra đường dẫn trên điện thoại, đặt `TVC_DOWNLOADER_URL=https://cuongbx.duckdns.org/downloader/` cho trang chủ TVC Studio AI và triển khai lại website. Giữ nguyên cấu hình TLS và Nextcloud hiện có.
+
 Giao diện web tiếng Việt cho điện thoại và PC, chạy tải video trên Ubuntu. Hỗ trợ URL Douyin, TikTok, Facebook, YouTube. F2 dùng cho video lẻ và kênh Douyin, kênh TikTok; yt-dlp dùng cho video lẻ TikTok và Facebook/YouTube. Danh sách xem trước lấy từ yt-dlp, tùy nền tảng và cookie có thể không quét được. Không có trình duyệt đăng nhập tích hợp.
 
 Bản 0.5.2: các ô Hoạt động mở hàng đợi theo trạng thái; ô URL có mẫu link kênh và tự tách URL từ đoạn chia sẻ Douyin; video lẻ Douyin tải bằng F2. Nếu một tác vụ cũ đã báo lỗi, thêm lại link video để tạo tác vụ mới. Nếu F2 vẫn báo lỗi xác thực, xem thông báo ở **Cần kiểm tra** và thiết lập cookie Douyin trên Ubuntu.
