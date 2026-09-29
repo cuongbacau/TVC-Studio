@@ -18,6 +18,14 @@ Bản 0.5.8: Facebook không còn dùng nhãn ảnh “Bản xem trước ô th�
 
 Bản 0.5.9: quét Facebook nhận thêm link hồ sơ dạng `/people/Ten/ID/?sk=reels_tab`, tự đổi thành URL Reels theo ID. Khi dán link Reel riêng `/share/r/ID/`, giao diện tự chọn **Tải một video riêng**; dán lại link hồ sơ khi đang ở chế độ video sẽ trở về chế độ quét 20. Link chia sẻ riêng vẫn cần Facebook trả URL gốc lúc giải mã và cookie hợp lệ khi nguồn giới hạn truy cập.
 
+Bản 0.6.0: ở kết quả quét có **Lưu ảnh** trên từng thẻ và **Lưu ảnh đã chọn** (tối đa 100 ảnh mỗi lượt). Lưu ảnh xem trước nguyên gốc do nền tảng cung cấp vào `data/downloads/Trang_phuc/<Thư mục>` trên Ubuntu; ảnh xuất hiện trong Hàng đợi để xem/tải về thiết bị. Ảnh đã lưu được nhận ra theo URL video để tránh tải lại. Chỉ nhận HTTPS từ các miền CDN ảnh của nền tảng, giới hạn 15 MB, kiểm tra dữ liệu ảnh; một số ảnh ký URL ngắn hạn có thể hết hạn hoặc nguồn chặn tải từ máy chủ. Đây là ảnh xem trước gốc, không tách riêng quần áo hay làm tăng độ phân giải.
+
+Bản 0.6.1: khi xem danh sách video đã quét, thanh thao tác nổi luôn ở cuối màn hình với **Tải đã chọn** và **Tải tất cả**. Thanh hiện số lượng đã chọn, hoạt động trên PC và điện thoại, tự ẩn khi rời khu vực kết quả. Các video được đưa vào hàng đợi theo thứ tự; giao diện cập nhật hàng đợi sau mỗi lượt thêm hàng loạt. Nút Tải tất cả chỉ áp dụng cho kết quả quét đang hiển thị.
+
+Bản 0.6.2: ô link tự nhận dạng video riêng hay kênh. Link video có nút **Tải video**; link kênh có **Quét kênh** và lựa chọn 20/50/toàn kênh. Bỏ lựa chọn tải cả kênh trực tiếp bằng F2 khỏi giao diện; người dùng xem kết quả quét trước rồi chọn video cần tải hoặc bấm **Tải tất cả** trên thanh nổi. Tác vụ F2 cũ vẫn có thể xem trong Hàng đợi. Nếu TikTok báo lỗi khi lấy chi tiết 20/50 video, ứng dụng thử lại với danh sách gọn; trường caption/lượt xem có thể trống khi nguồn không trả.
+
+Bản 0.6.3: với link video Facebook `/share/r/…` hoặc `/share/v/…`, chỉ cần bấm **Tải video**. Tác vụ vào hàng đợi rồi tự giải mã URL gốc trước khi tải; không còn nút giải mã riêng. Nếu HTTP không thấy URL gốc, ứng dụng thử bằng Chromium ẩn cùng cookie Facebook (nếu đã cấu hình). URL gốc dạng `/videos/ID/` được giữ nguyên; nếu Facebook không trả URL hoặc video bị chặn, Hàng đợi hiện lỗi cụ thể để kiểm tra.
+
 ## Cài trên Ubuntu
 
 Cần Docker Engine và Docker Compose plugin. Giải nén, vào thư mục `tvc-downloader`, rồi:
@@ -66,8 +74,8 @@ Script kiểm tra gói, sao lưu mã nguồn cũ trong `.updates/`, thay mã, ch
 
 ## Dùng
 
-1. Bấm mẫu link Douyin/TikTok/Facebook để điền đầu link kênh, thêm tên/ID, chọn quét **20**, **50** hoặc **toàn kênh**, rồi bấm nút chính. Với Facebook, dùng URL tab Reels của Trang; link `/share/r/…` là một video: chọn **Tải một video riêng** (có thể bấm Giải mã link Facebook để xem link gốc). Có thể dán nguyên đoạn chia sẻ Douyin: ứng dụng tự tách link. Quét Douyin vẫn phụ thuộc khả năng yt-dlp và cookie; nếu không quét được, chọn **Tải cả kênh trực tiếp** để dùng F2.
-2. Với URL video riêng, chọn **Tải một video riêng** rồi bấm **Tải video riêng**.
+1. Dán link kênh TikTok/Douyin/Facebook/YouTube, chọn **20**, **50** hoặc **toàn kênh**, rồi bấm **Quét kênh**. Sau đó chọn video cần tải hoặc bấm **Tải tất cả** trên thanh nổi. Với Facebook, dùng URL tab Reels của Trang; link `/share/r/…` là một video. Có thể dán nguyên đoạn chia sẻ Douyin: ứng dụng tự tách link. Quét kênh vẫn phụ thuộc khả năng trả danh sách của nền tảng và cookie.
+2. Với URL video riêng, ứng dụng tự hiện **Tải video** để thêm vào hàng đợi; không cần chọn chế độ. Link `/share/r/…` hoặc `/share/v/…` của Facebook tự giải mã khi tác vụ chạy. Nếu nguồn yêu cầu đăng nhập, đặt cookie Netscape còn hạn tại `data/cookies/facebook.txt` trên Ubuntu.
 3. Đặt **Thư mục lưu** trước khi thêm tác vụ. File ở `data/downloads/<Nền tảng>/<Thư mục>` trên Ubuntu. Mỗi kênh nên đặt tên thư mục riêng.
 4. Hàng đợi vẫn chạy khi đóng trang; khởi động lại container thì tác vụ đang chạy được xếp lại. Các tác vụ hoàn tất lưu dấu qua `data/archive.txt` đối với yt-dlp. F2 quản lý file trùng theo cơ chế riêng của F2.
 5. **Tạm dừng** tác vụ đang tải sẽ ngắt tiến trình. **Tiếp tục** sẽ gọi lại bộ tải; yt-dlp dùng file `.part` để tiếp tục khi nguồn hỗ trợ. F2 có thể phải kiểm tra lại danh sách của kênh.

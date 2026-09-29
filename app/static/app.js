@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let scanItems = [], jobs = [], mediaFiles = [], queuePaused = false, busy = false, activeJobFilter = 'all';
+let scanItems = [], jobs = [], mediaFiles = [], queuePaused = false, busy = false, imageSaving = false, batchAdding = false, activeJobFilter = 'all';
 let lastMediaRefresh = 0;
 const names = {queued:'Đang chờ',running:'Đang tải',paused:'Tạm dừng',done:'Hoàn tất',failed:'Lỗi'};
 const filterTitles = {queued:'Đang chờ',running:'Đang tải',done:'Hoàn tất',failed:'Cần kiểm tra'};
@@ -18,60 +18,57 @@ function enteredUrl() {
   const raw = $('url').value.trim(), match = raw.match(/https?:\/\/[^\s\u3000-\u9fff<>"']+/i);
   return match ? match[0].replace(/[.,;:!?)}\]，。！？；、）》】]+$/u, '') : raw;
 }
+function linkKind(value) {
+  let parsed;
+  try { parsed = new URL(value); } catch { return 'unknown'; }
+  if (!['http:', 'https:'].includes(parsed.protocol)) return 'unknown';
+  const host = parsed.hostname.toLowerCase(), path = parsed.pathname.toLowerCase();
+  if (['vm.tiktok.com','vt.tiktok.com','v.douyin.com','fb.watch','youtu.be'].includes(host)) return 'video';
+  if (['tiktok.com','www.tiktok.com','m.tiktok.com'].includes(host)) {
+    if (/^\/@[^/]+\/(?:video|photo)\/\d+/.test(path) || /^\/t\//.test(path)) return 'video';
+    return /^\/@[^/]+\/?$/.test(path) ? 'channel' : 'unknown';
+  }
+  if (['douyin.com','www.douyin.com','iesdouyin.com'].includes(host)) {
+    if (/^\/(?:video|note)\/\d+/.test(path)) return 'video';
+    return /^\/user\//.test(path) ? 'channel' : 'unknown';
+  }
+  if (['facebook.com','www.facebook.com','m.facebook.com'].includes(host)) {
+    if (/^\/share\/[rv]\//.test(path) || /^\/reels?\/\d+/.test(path) || /\/videos\/\d+/.test(path) || (/^\/watch\/?$/.test(path) && parsed.searchParams.has('v'))) return 'video';
+    return path !== '/' ? 'channel' : 'unknown';
+  }
+  if (['youtube.com','www.youtube.com','m.youtube.com'].includes(host)) {
+    if ((path === '/watch' && parsed.searchParams.has('v')) || /^\/(?:shorts|live)\/[^/]+/.test(path)) return 'video';
+    return /^\/(?:@[^/]+|channel\/[^/]+|c\/[^/]+|user\/[^/]+|playlist)\/?/.test(path) ? 'channel' : 'unknown';
+  }
+  return 'unknown';
+}
 function updateSourceHelp() {
   const value = enteredUrl();
-  const shortFacebook = /facebook\.com\/share\/[rv]\//i.test(value);
-  if (/(?:facebook\.com\/(?:share\/[rv]\/|reels?\/\d{6,}|videos\/\d{6,})|facebook\.com\/watch\?v=)/i.test(value)) {
-    $('scanMode').value = 'single';
-    $('scanBtn').textContent = 'Tải video riêng';
-  } else if ($('scanMode').value === 'single' && /facebook\.com\/(?:profile\.php\?id=\d{10,20}|people\/[^/]+\/\d{10,20}|[^/]+\/reels\/)/i.test(value)) {
-    $('scanMode').value = '20';
-    $('scanBtn').textContent = 'Quét 20 video mới nhất';
-  }
-  $('resolveBtn').hidden = !shortFacebook;
+  const kind = linkKind(value), shortFacebook = /facebook\.com\/share\/[rv]\//i.test(value);
+  $('scanLimitWrap').hidden = kind !== 'channel';
+  $('scanBtn').textContent = kind === 'video' ? 'Tải video' : kind === 'channel' ? 'Quét kênh' : 'Dán link để bắt đầu';
   const label = /douyin\.com/i.test(value) ? 'Douyin' : /tiktok\.com/i.test(value) ? 'TikTok' : /(facebook\.com|fb\.watch)/i.test(value) ? 'Facebook' : /youtu\.?be/i.test(value) ? 'YouTube' : '';
-  $('sourceHelp').textContent = shortFacebook ? 'Link chia sẻ Facebook: chọn Tải một video riêng; ứng dụng tự giải mã khi tải.' : label ? 'Đã nhận link ' + label + '. Chọn cách quét kênh hoặc tải một video ở ô Chế độ.' : 'Bấm mẫu để điền đầu link kênh, rồi thêm tên hoặc ID. Có thể dán nguyên đoạn chia sẻ chứa link.';
+  $('sourceHelp').textContent = shortFacebook ? 'Đã nhận link chia sẻ Facebook. Bấm Tải video; ứng dụng tự giải mã trong hàng đợi.' : kind === 'video' ? 'Đã nhận link video ' + label + '. Bấm Tải video để thêm vào hàng đợi.' : kind === 'channel' ? 'Đã nhận link kênh ' + label + '. Chọn số lượng rồi quét để xem video trước khi tải.' : 'Dán link video hoặc kênh. Ứng dụng sẽ tự nhận dạng; không cần chọn chế độ tải.';
 }
 document.querySelectorAll('[data-example]').forEach(button => button.onclick = () => { $('url').value = button.dataset.example; $('url').focus(); updateSourceHelp(); });
 $('url').addEventListener('input', updateSourceHelp);
 $('url').addEventListener('paste', () => setTimeout(() => { const url = enteredUrl(); if (url !== $('url').value.trim()) { $('url').value = url; note('Đã tách link từ đoạn chia sẻ.'); } updateSourceHelp(); }, 0));
 function folder() { return $('folder').value.trim(); }
-async function add(url, mode = 'video', title = '', quiet = false) {
+async function add(url, mode = 'video', title = '', quiet = false, refreshAfter = true) {
   try {
-    if (mode === 'video' && /facebook\.com\/share\/[rv]\//i.test(url)) {
-      note('Đang giải mã link Facebook…');
-      const decoded = await api('/resolve', 'POST', {url});
-      if (enteredUrl() === url) { $('url').value = decoded.url; updateSourceHelp(); }
-      url = decoded.url;
-    }
     const value = await api('/jobs', 'POST', {url, mode, title, folder:folder(), engine:'auto'});
-    if (!quiet) note(value.duplicate ? 'Link này đã nằm trong hàng đợi.' : 'Đã thêm vào hàng đợi.');
-    await refresh(); return true;
+    if (!quiet) note(value.duplicate ? 'Link này đã nằm trong hàng đợi.' : /facebook\.com\/share\/[rv]\//i.test(url) ? 'Đã thêm vào hàng đợi; đang tự giải mã link Facebook trước khi tải.' : 'Đã thêm vào hàng đợi.');
+    if (refreshAfter) await refresh(); return true;
   } catch (error) { note(error.message, true); return false; }
 }
-$('resolveBtn').onclick = async () => {
-  const url = enteredUrl(); $('resolveBtn').disabled = true; note('Đang giải mã link Facebook…');
-  try {
-    const decoded = await api('/resolve', 'POST', {url});
-    $('url').value = decoded.url; updateSourceHelp(); note(decoded.resolved ? 'Đã tìm thấy link Reel gốc: ' + decoded.url : 'Link này đã là link gốc.');
-  } catch (error) { note(error.message, true); }
-  finally { $('resolveBtn').disabled = false; }
-};
-const modeLabels = {'20':'Quét 20 video mới nhất','50':'Quét 50 video mới nhất',all:'Quét toàn kênh',single:'Tải video riêng',channel:'Tải cả kênh'};
-$('scanMode').onchange = () => { $('scanBtn').textContent = modeLabels[$('scanMode').value]; };
 $('scanBtn').onclick = async () => {
-  const url = enteredUrl(), mode = $('scanMode').value;
+  const url = enteredUrl(), kind = linkKind(url), mode = $('scanMode').value;
   if (!url) return note('Dán URL trước.', true);
   if (busy) return;
-  if (mode === 'single') {
-    if (/(?:facebook\.com\/(?:profile\.php|people\/[^/]+\/\d{10,20}|[^/]+\/reels)|tiktok\.com\/@[^/]+\/?$|douyin\.com\/user\/)/i.test(url)) return note('Đây là link kênh. Hãy chọn một chế độ quét.', true);
+  if (kind === 'unknown') return note('Chưa nhận ra link video hoặc kênh. Kiểm tra lại URL TikTok, Douyin, Facebook hoặc YouTube.', true);
+  if (kind === 'video') {
     busy = true; $('scanBtn').disabled = true;
     try { await add(url); } finally { busy = false; $('scanBtn').disabled = false; }
-    return;
-  }
-  if (mode === 'channel') {
-    busy = true; $('scanBtn').disabled = true;
-    try { await add(url, 'channel', 'Tải cả kênh'); } finally { busy = false; $('scanBtn').disabled = false; }
     return;
   }
   busy = true; $('scanBtn').disabled = true; $('scanBtn').textContent = 'Đang quét…'; note('Đang lấy danh sách video…');
@@ -81,8 +78,9 @@ $('scanBtn').onclick = async () => {
     $('resultsMeta').textContent = data.platform + ' · ' + data.items.length + ' video' + (data.limited ? ' (đã đạt giới hạn quét)' : '');
     renderResults(); note(data.items.length ? 'Chọn video rồi nhấn Tải đã chọn. Thông tin nào nguồn không trả sẽ để trống.' : 'Không có video xem trước.');
   } catch (error) { note(error.message, true); }
-  finally { busy = false; $('scanBtn').disabled = false; $('scanBtn').textContent = modeLabels[$('scanMode').value]; }
+  finally { busy = false; $('scanBtn').disabled = false; updateSourceHelp(); }
 };
+updateSourceHelp();
 function scanMeta(item) {
   const bits = [item.platform];
   if (item.upload_date) bits.push(String(item.upload_date).replace(/^(\d{4})(\d{2})(\d{2})$/, '$3/$2/$1'));
@@ -98,24 +96,92 @@ function syncResultSelection() {
   $('selectResults').indeterminate = picks.some(x => x.checked) && !picks.every(x => x.checked);
   $('selectedBtn').hidden = !selected;
   $('selectedBtn').textContent = 'Tải đã chọn (' + selected + ')';
+  $('scanSelectionCount').textContent = 'Đã chọn ' + selected + '/' + picks.length + ' video';
+  $('floatingSelectedBtn').textContent = 'Tải đã chọn (' + selected + ')';
+  $('floatingSelectedBtn').disabled = batchAdding || !selected;
+  $('floatingAllBtn').disabled = batchAdding || !picks.length;
+  updateScanActionBar();
+  const withImages = picks.filter(x => x.checked && scanItems[Number(x.dataset.index)]?.thumbnail).length;
+  $('saveImagesBtn').hidden = !withImages;
+  $('saveImagesBtn').textContent = 'Lưu ảnh đã chọn (' + withImages + ')';
 }
+function updateScanActionBar() {
+  const section = $('resultsSection'), bounds = section.getBoundingClientRect();
+  $('scanActionBar').hidden = !scanItems.length || bounds.bottom <= 0 || bounds.top >= window.innerHeight;
+}
+window.addEventListener('scroll', updateScanActionBar, {passive:true});
+window.addEventListener('resize', updateScanActionBar);
 function renderResults() {
+  $('resultsSection').classList.toggle('has-scan-results', Boolean(scanItems.length));
   $('selectResultsWrap').hidden = !scanItems.length;
   $('selectResults').checked = false;
-  $('results').innerHTML = scanItems.length ? scanItems.map((item, i) => `<article class="result-card"><div class="result-poster">${item.thumbnail ? `<img src="${esc(item.thumbnail)}" alt="Ảnh xem trước" loading="lazy" referrerpolicy="no-referrer">` : '<div class="poster-empty">▶</div>'}<span class="result-index">#${i + 1}</span><label class="result-pick" title="Chọn video"><input type="checkbox" class="pick" data-index="${i}" aria-label="Chọn video số ${i + 1}"></label><button class="poster-play" data-preview="${i}" aria-label="Xem video số ${i + 1}">▶</button></div><div class="result-info"><div class="itemtitle" title="${esc(item.title)}">${esc(item.title)}</div><div class="result-metadata">${esc(scanMeta(item))}</div>${item.caption ? `<div class="scan-caption" title="${esc(item.caption)}"><b>Caption:</b> ${esc(item.caption)}</div>` : ''}${item.hashtags?.length ? `<div class="scan-tags" title="${esc(item.hashtags.map(tag => '#' + tag).join(' '))}">${item.hashtags.map(tag => '#' + esc(tag)).join(' ')}</div>` : ''}<div class="result-actions"><button class="mini" data-preview="${i}">▶ Xem</button><button class="mini" data-add="${i}">⇩ Tải</button></div></div></article>`).join('') : '<div class="empty">Không có video nào.</div>';
+  $('results').innerHTML = scanItems.length ? scanItems.map((item, i) => `<article class="result-card"><div class="result-poster">${item.thumbnail ? `<img src="${esc(item.thumbnail)}" alt="Ảnh xem trước" loading="lazy" referrerpolicy="no-referrer">` : '<div class="poster-empty">▶</div>'}<span class="result-index">#${i + 1}</span><label class="result-pick" title="Chọn video"><input type="checkbox" class="pick" data-index="${i}" aria-label="Chọn video số ${i + 1}"></label><button class="poster-play" data-preview="${i}" aria-label="Xem video số ${i + 1}">▶</button></div><div class="result-info"><div class="itemtitle" title="${esc(item.title)}">${esc(item.title)}</div><div class="result-metadata">${esc(scanMeta(item))}</div>${item.caption ? `<div class="scan-caption" title="${esc(item.caption)}"><b>Caption:</b> ${esc(item.caption)}</div>` : ''}${item.hashtags?.length ? `<div class="scan-tags" title="${esc(item.hashtags.map(tag => '#' + tag).join(' '))}">${item.hashtags.map(tag => '#' + esc(tag)).join(' ')}</div>` : ''}<div class="result-actions"><button class="mini" data-preview="${i}">▶ Xem</button><button class="mini" data-add="${i}">⇩ Tải</button><button class="mini" data-save-image="${i}" ${item.thumbnail ? '' : 'disabled title="Nguồn chưa có ảnh"'}>▧ Lưu ảnh</button></div></div></article>`).join('') : '<div class="empty">Không có video nào.</div>';
   $('results').querySelectorAll('.result-poster img').forEach(image => image.onerror = () => { const fallback = document.createElement('div'); fallback.className = 'poster-empty'; fallback.textContent = '▶'; image.replaceWith(fallback); });
   $('results').querySelectorAll('.pick').forEach(box => box.onchange = syncResultSelection);
   $('results').querySelectorAll('[data-add]').forEach(button => button.onclick = () => { const item = scanItems[Number(button.dataset.add)]; add(item.url, 'video', item.title); });
   $('results').querySelectorAll('[data-preview]').forEach(button => button.onclick = () => window.TVCViewer.preview(scanItems[Number(button.dataset.preview)]));
+  $('results').querySelectorAll('[data-save-image]').forEach(button => button.onclick = async () => {
+    button.disabled = true;
+    try {
+      const item = scanItems[Number(button.dataset.saveImage)];
+      const result = await api('/scan/image', 'POST', {url:item.url, thumbnail:item.thumbnail, title:item.title, folder:folder()});
+      button.textContent = '✓ Đã lưu';
+      note(result.duplicate ? 'Ảnh này đã được lưu trên Ubuntu.' : 'Đã lưu ảnh vào Trang_phuc/' + (folder() || 'Mac_dinh') + '.');
+      lastMediaRefresh = 0; await refresh();
+    } catch (error) { button.disabled = false; note(error.message, true); }
+  });
   syncResultSelection();
 }
 $('selectResults').onchange = event => { document.querySelectorAll('#results .pick').forEach(box => box.checked = event.target.checked); syncResultSelection(); };
 $('selectedBtn').onclick = async () => {
+  if (batchAdding) return;
   const indices = [...document.querySelectorAll('#results .pick:checked')].map(x => Number(x.dataset.index));
   if (!indices.length) return note('Chọn ít nhất một video.', true);
-  $('selectedBtn').disabled = true; let count = 0;
-  for (const i of indices) { const item = scanItems[i]; if (await add(item.url, 'video', item.title, true)) count++; }
-  $('selectedBtn').disabled = false; note('Đã đưa ' + count + '/' + indices.length + ' video vào hàng đợi.');
+  batchAdding = true; $('selectedBtn').disabled = true; syncResultSelection();
+  let count = 0;
+  try {
+    for (const [position, i] of indices.entries()) {
+      const item = scanItems[i];
+      if (await add(item.url, 'video', item.title, true, false)) count++;
+      if ((position + 1) % 10 === 0) note('Đang đưa video vào hàng đợi: ' + (position + 1) + '/' + indices.length);
+    }
+    await refresh();
+    note('Đã đưa ' + count + '/' + indices.length + ' video vào hàng đợi.', count !== indices.length);
+  } finally { batchAdding = false; $('selectedBtn').disabled = false; syncResultSelection(); }
+};
+$('floatingSelectedBtn').onclick = () => $('selectedBtn').click();
+$('floatingAllBtn').onclick = () => {
+  if (batchAdding || !scanItems.length) return;
+  document.querySelectorAll('#results .pick').forEach(box => box.checked = true);
+  syncResultSelection();
+  $('selectedBtn').click();
+};
+$('saveImagesBtn').onclick = async () => {
+  if (imageSaving) return;
+  const selected = [...document.querySelectorAll('#results .pick:checked')].map(box => Number(box.dataset.index)).filter(i => scanItems[i]?.thumbnail);
+  if (!selected.length) return note('Chọn video có ảnh xem trước.', true);
+  const indices = selected.slice(0, 100);
+  imageSaving = true; $('saveImagesBtn').disabled = true;
+  let cursor = 0, saved = 0, failed = 0, lastError = '';
+  const worker = async () => {
+    while (cursor < indices.length) {
+      const i = indices[cursor++], item = scanItems[i];
+      try {
+        await api('/scan/image', 'POST', {url:item.url, thumbnail:item.thumbnail, title:item.title, folder:folder()});
+        saved++;
+        const box = document.querySelector(`#results .pick[data-index="${i}"]`);
+        if (box) box.checked = false;
+        const button = document.querySelector(`#results [data-save-image="${i}"]`);
+        if (button) { button.textContent = '✓ Đã lưu'; button.disabled = true; }
+      } catch (error) { failed++; lastError = error.message; }
+      note('Đang lưu ảnh: ' + (saved + failed) + '/' + indices.length);
+    }
+  };
+  try {
+    await Promise.all(Array.from({length:Math.min(3, indices.length)}, worker));
+    lastMediaRefresh = 0; await refresh();
+    note('Đã lưu ' + saved + '/' + indices.length + ' ảnh.' + (failed ? ' ' + failed + ' ảnh lỗi: ' + lastError : '') + (selected.length > 100 ? ' Chọn Lưu ảnh đã chọn lần nữa để lưu tiếp.' : ''), !!failed);
+  } finally { imageSaving = false; $('saveImagesBtn').disabled = false; syncResultSelection(); }
 };
 function dateTime(seconds) { return seconds ? new Date(seconds * 1000).toLocaleString('vi-VN', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : ''; }
 function fileControls(file, number, legacy = false) {

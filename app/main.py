@@ -12,6 +12,8 @@ import mimetypes
 import html
 import hashlib
 import subprocess
+import ipaddress
+import socket
 from html.parser import HTMLParser
 from http.cookiejar import MozillaCookieJar
 from pathlib import Path
@@ -38,6 +40,12 @@ worker_task = None
 paused = False
 VIDEO_EXT = {'.mp4', '.webm', '.mov', '.m4v', '.mkv'}
 IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'}
+IMAGE_HOSTS = {
+    'Facebook': ('fbcdn.net', 'fbsbx.com', 'facebook.com'),
+    'TikTok': ('tiktokcdn.com', 'tiktokcdn-us.com', 'tiktokv.com', 'tiktok.com', 'byteimg.com', 'ibyteimg.com', 'muscdn.com'),
+    'Douyin': ('douyinpic.com', 'douyincdn.com', 'douyin.com', 'byteimg.com', 'ibyteimg.com', 'snssdk.com'),
+    'YouTube': ('ytimg.com', 'googleusercontent.com', 'ggpht.com'),
+}
 
 
 def auth(credentials: HTTPBasicCredentials = Depends(security)):
@@ -153,13 +161,15 @@ def canonical_facebook_video(url):
     host = (parsed.hostname or '').lower()
     if host != 'facebook.com' and not host.endswith('.facebook.com'):
         return None
-    match = re.search(r'/(?:reel|reels|videos)/(\d{6,})(?:/|$)', parsed.path)
+    match = re.search(r'/(reel|reels|videos)/(\d{6,})(?:/|$)', parsed.path)
     if match:
-        return f'https://www.facebook.com/reel/{match.group(1)}/'
+        if match.group(1) == 'videos':
+            return f'https://www.facebook.com{parsed.path[:match.end(2)]}/'
+        return f'https://www.facebook.com/reel/{match.group(2)}/'
     if parsed.path.rstrip('/') in ('/watch', '/watch/'):
         video_id = parse_qs(parsed.query).get('v', [''])[0]
         if re.fullmatch(r'\d{6,}', video_id):
-            return f'https://www.facebook.com/reel/{video_id}/'
+            return f'https://www.facebook.com/watch/?v={video_id}'
     return None
 
 
@@ -201,6 +211,7 @@ def resolve_facebook_share(url):
             raise HTTPException(422, 'Cookie Facebook không đúng định dạng Netscape')
     opener = build_opener(HTTPCookieProcessor(jar), FacebookRedirects())
     request = URLRequest(url, headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'})
+    direct_error = ''
     try:
         with opener.open(request, timeout=15) as response:
             canonical = canonical_facebook_video(response.geturl())
@@ -214,8 +225,23 @@ def resolve_facebook_share(url):
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(422, f'Không giải mã được link Facebook: {str(exc)[:130]}')
-    raise HTTPException(422, 'Facebook chưa trả link Reel gốc. Kiểm tra cookie Facebook hoặc mở link xem còn hoạt động.')
+        direct_error = str(exc)[:130]
+    # The share page sometimes hides the canonical URL from plain HTTP. Try
+    # the bundled headless Chromium with the same optional cookie file.
+    try:
+        result = subprocess.run(
+            [sys.executable, '-m', 'app.facebook_resolve', url, str(cookies) if cookies else ''],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+        if result.returncode == 0:
+            for candidate in json.loads(result.stdout).get('candidates', []):
+                if canonical := canonical_facebook_video(candidate):
+                    return canonical
+        browser_error = result.stderr.strip()[-160:]
+    except (subprocess.TimeoutExpired, ValueError, OSError) as exc:
+        browser_error = str(exc)[:160]
+    detail = browser_error or direct_error
+    raise HTTPException(422, 'Facebook chưa trả link video gốc. Kiểm tra link/cookie Facebook.' + (f' Chi tiết: {detail}' if detail else ''))
 
 
 def facebook_reels_url(url):
@@ -377,6 +403,93 @@ def folder_name(value):
     return value
 
 
+def validate_image_url(value, platform):
+    if not isinstance(value, str) or len(value) > 4096:
+        raise HTTPException(422, 'Đường dẫn ảnh không hợp lệ')
+    parsed = urlparse(value)
+    try:
+        host = (parsed.hostname or '').lower().rstrip('.')
+        port = parsed.port
+    except ValueError:
+        raise HTTPException(422, 'Cổng ảnh không hợp lệ')
+    if (parsed.scheme != 'https' or parsed.username or parsed.password or port not in (None, 443)
+            or not any(host == domain or host.endswith('.' + domain) for domain in IMAGE_HOSTS[platform])):
+        raise HTTPException(422, 'Ảnh không thuộc nguồn video đã quét')
+    try:
+        addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        if not addresses or any(not ipaddress.ip_address(info[4][0]).is_global for info in addresses):
+            raise HTTPException(422, 'Máy chủ ảnh không hợp lệ')
+    except OSError:
+        raise HTTPException(422, 'Không phân giải được máy chủ ảnh')
+    return value
+
+
+class ImageRedirects(HTTPRedirectHandler):
+    def __init__(self, platform):
+        self.platform = platform
+        super().__init__()
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        validate_image_url(newurl, self.platform)
+        return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+def image_extension(data):
+    if data.startswith(b'\xff\xd8\xff'):
+        return '.jpg'
+    if data.startswith(b'\x89PNG\r\n\x1a\n'):
+        return '.png'
+    if data.startswith(b'RIFF') and data[8:12] == b'WEBP':
+        return '.webp'
+    if data.startswith((b'GIF87a', b'GIF89a')):
+        return '.gif'
+    if data[4:12] in (b'ftypavif', b'ftypavis'):
+        return '.avif'
+    raise HTTPException(422, 'Nguồn không trả file ảnh hợp lệ')
+
+
+def save_scan_image(video_url, thumbnail, title, folder):
+    video_url = clean_url(video_url)
+    platform = platform_of(video_url)
+    validate_image_url(thumbnail, platform)
+    destination = DOWNLOADS / 'Trang_phuc' / folder_name(folder or 'Mac_dinh')
+    destination.mkdir(parents=True, exist_ok=True)
+    short_title = re.sub(r'[^\w .-]', '_', title[:65], flags=re.UNICODE).strip(' .') or 'Anh_xem_truoc'
+    stem = f'{platform}_{short_title}_{hashlib.sha256(video_url.encode()).hexdigest()[:12]}'
+    for ext in IMAGE_EXT:
+        existing = destination / (stem + ext)
+        if existing.is_file():
+            return {'file': media_entry(existing), 'duplicate': True}
+    request = URLRequest(thumbnail, headers={'User-Agent': 'Mozilla/5.0', 'Referer': video_url})
+    try:
+        with build_opener(ImageRedirects(platform)).open(request, timeout=20) as response:
+            data = response.read(15_000_001)
+    except OSError:
+        raise HTTPException(422, 'Không lấy được ảnh xem trước; link ảnh có thể đã hết hạn')
+    if not data or len(data) > 15_000_000:
+        raise HTTPException(422, 'Ảnh rỗng hoặc vượt giới hạn 15 MB')
+    target = destination / (stem + image_extension(data))
+    temporary = destination / (stem + '-' + uuid.uuid4().hex + '.part')
+    try:
+        temporary.write_bytes(data)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return {'file': media_entry(target), 'duplicate': False}
+
+
+class SaveScanImage(BaseModel):
+    url: str = Field(max_length=4096)
+    thumbnail: str = Field(max_length=4096)
+    title: str = Field('', max_length=160)
+    folder: str = Field('', max_length=80)
+
+
+@app.post('/api/scan/image')
+async def save_scan_thumbnail(payload: SaveScanImage, _: None = Depends(auth)):
+    return await asyncio.to_thread(save_scan_image, payload.url, payload.thumbnail, payload.title, payload.folder)
+
+
 class Scan(BaseModel):
     url: str
     limit: int = Field(20, ge=1, le=2000)
@@ -526,6 +639,12 @@ async def scan(payload: Scan, _: None = Depends(auth)):
     try:
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         out, err = await asyncio.wait_for(proc.communicate(), timeout=480)
+        if proc.returncode and platform == 'TikTok' and payload.limit <= 50:
+            # A single inaccessible video can stop detail extraction for the
+            # entire channel. Keep the list usable, with sparse metadata.
+            fallback = ['--flat-playlist' if arg == '--no-flat-playlist' else arg for arg in cmd]
+            proc = await asyncio.create_subprocess_exec(*fallback, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=480)
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()

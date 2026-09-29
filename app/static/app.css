@@ -41,6 +41,14 @@
 .scan-caption,.scan-tags{font-size:10px;line-height:1.35;color:#c7c2d4;margin-top:5px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-clamp:2;overflow-wrap:anywhere}
 .scan-tags{color:#b989f2}
 .result-actions{display:flex;gap:5px;margin-top:9px}.result-actions .mini{flex:1;text-align:center;padding:6px 3px;font-size:10px}
+.result-actions{flex-wrap:wrap}.result-actions [data-save-image]{flex-basis:100%;background:#243b39;border-color:#375d52;color:#bcf5dc}
 @media(max-width:760px){#results.scan-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.result-poster{height:130px}.result-info{padding:6px}.result-info .itemtitle{font-size:10px;min-height:26px}.result-metadata,.scan-caption,.scan-tags{font-size:8px}.result-actions .mini{font-size:9px}.poster-play{opacity:1;width:30px;height:30px;font-size:14px}}
 @media(max-width:510px){#results.scan-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.result-poster{height:150px}}
 @media(max-width:360px){.result-poster{height:120px}.result-actions{flex-wrap:wrap}}
+/* Keep the scan actions reachable while browsing a long result list. */
+.scan-action-bar{position:fixed;z-index:8;bottom:max(16px,env(safe-area-inset-bottom));left:calc(232px + (100vw - 232px)/2);transform:translateX(-50%);width:min(610px,calc(100vw - 280px));display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 13px;background:#171b31f2;border:1px solid #7555ac;border-radius:16px;box-shadow:0 12px 40px #02030bba;backdrop-filter:blur(16px)}
+.scan-action-bar>span{font-size:13px;font-weight:700;color:#dfd1fb;white-space:nowrap}.scan-action-buttons{display:flex;gap:8px;min-width:0}.scan-action-buttons button{font-size:13px;white-space:nowrap;padding:10px 13px}
+#resultsSection.has-scan-results{padding-bottom:82px}
+@media(max-width:1100px){.scan-action-bar{left:calc(190px + (100vw - 190px)/2);width:min(610px,calc(100vw - 230px))}}
+@media(max-width:760px){.scan-action-bar{left:50%;bottom:max(8px,env(safe-area-inset-bottom));width:calc(100vw - 16px);padding:9px;gap:8px;border-radius:12px}.scan-action-bar>span{font-size:10px}.scan-action-buttons{flex:1;justify-content:flex-end;gap:5px}.scan-action-buttons button{font-size:10px;padding:9px 8px;border-radius:8px}}
+@media(max-width:370px){.scan-action-bar>span{font-size:9px}.scan-action-buttons button{font-size:9px;padding:8px 6px}}
